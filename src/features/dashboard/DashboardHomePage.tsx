@@ -27,10 +27,12 @@ export function DashboardHomePage() {
         </ul>
       </div>
       <div className="stat-card">
-        <h3>Note</h3>
-        <p style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-          Multi-layer transactions are deferred to Phase 2 by design.
-        </p>
+        <h3>Phase 2 — Employee Transactions</h3>
+        <ul style={{ listStyle: 'disc', paddingLeft: '1.1rem', marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+          <li>Unified ledger: timesheet earnings, applied expenses, reimbursements</li>
+          <li>Manual credits, debits, and payments to employees</li>
+          <li>Sync from earnings and expenses; running net by period</li>
+        </ul>
       </div>
     </div>
   )

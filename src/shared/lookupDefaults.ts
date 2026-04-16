@@ -47,6 +47,12 @@ export const LOOKUP_CATEGORIES: {
       { key: 'timesheet_work_type', label: 'Work Type' },
     ],
   },
+  {
+    page: 'Employee Transactions',
+    categories: [
+      { key: 'employee_transaction_kind', label: 'Transaction kind (labels)' },
+    ],
+  },
 ]
 
 export const LOOKUP_DEFAULTS: Record<string, LookupOption[]> = {
@@ -124,5 +130,13 @@ export const LOOKUP_DEFAULTS: Record<string, LookupOption[]> = {
     { code: 'OVERTIME', label: 'Overtime' },
     { code: 'HOLIDAY', label: 'Holiday' },
     { code: 'HOLIDAY_OT', label: 'Holiday OT' },
+  ],
+  employee_transaction_kind: [
+    { code: 'EARNING_FROM_TIMESHEET', label: 'Earning (timesheet)' },
+    { code: 'EXPENSE_DEDUCTION', label: 'Expense deduction' },
+    { code: 'EXPENSE_REIMBURSEMENT', label: 'Expense reimbursement' },
+    { code: 'MANUAL_CREDIT', label: 'Manual credit' },
+    { code: 'MANUAL_DEBIT', label: 'Manual debit' },
+    { code: 'PAYMENT_TO_EMPLOYEE', label: 'Payment to employee' },
   ],
 }

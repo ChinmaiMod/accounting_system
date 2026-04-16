@@ -167,6 +167,30 @@ export type InvoiceProject = {
   amount: number
 }
 
+export type EmployeeTransaction = {
+  id: string
+  business_id: string
+  employee_id: string
+  project_id: string | null
+  txn_date: string
+  period_month: string
+  entry_kind:
+    | 'EARNING_FROM_TIMESHEET'
+    | 'EXPENSE_DEDUCTION'
+    | 'EXPENSE_REIMBURSEMENT'
+    | 'MANUAL_CREDIT'
+    | 'MANUAL_DEBIT'
+    | 'PAYMENT_TO_EMPLOYEE'
+  amount: number
+  description: string
+  notes: string | null
+  is_system_generated: boolean
+  source_earning_id: string | null
+  source_expense_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type EmployeeEarning = {
   id: string
   business_id: string

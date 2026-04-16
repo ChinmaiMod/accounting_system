@@ -71,8 +71,12 @@
   border-bottom: 1px solid var(--color-border);
   padding: 0 1.5rem;
   display: flex;
+  flex-wrap: wrap;
   gap: 0;
-  overflow-x: auto;
+  /* overflow-x: auto clips dropdowns (overflow-y becomes non-visible in browsers). */
+  overflow: visible;
+  position: relative;
+  z-index: 20;
   box-shadow: var(--shadow-sm);
 }
 
