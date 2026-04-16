@@ -22,16 +22,16 @@ export function DashboardHomePage() {
         <ul style={{ listStyle: 'disc', paddingLeft: '1.1rem', marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
           <li>Employees, end clients, vendors, projects</li>
           <li>Weekly timesheets (W2/C2C work types)</li>
-          <li>Employee expenses and deductions</li>
+          <li>Employee transactions for expenses, reimbursements, and adjustments</li>
           <li>Invoices, invoice-project linking, payments</li>
         </ul>
       </div>
       <div className="stat-card">
         <h3>Phase 2 — Employee Transactions</h3>
         <ul style={{ listStyle: 'disc', paddingLeft: '1.1rem', marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-          <li>Unified ledger: timesheet earnings, applied expenses, reimbursements</li>
+          <li>Unified ledger: timesheet earnings, expense deductions, reimbursements</li>
           <li>Manual credits, debits, and payments to employees</li>
-          <li>Sync from earnings and expenses; running net by period</li>
+          <li>Per-type add/subtract impact for employee and employer calculations</li>
         </ul>
       </div>
     </div>

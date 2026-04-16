@@ -33,7 +33,7 @@ export function OwnerShell({ session }: OwnerShellProps) {
   const employeesMenuRef = useRef<HTMLDetailsElement>(null)
 
   const projectRelatedPaths = ['/end-clients', '/vendors', '/projects', '/invoices', '/invoice-payments']
-  const employeeRelatedPaths = ['/employees', '/timesheets', '/expenses', '/employee-transactions', '/employee-dashboard']
+  const employeeRelatedPaths = ['/employees', '/timesheets', '/recipient-accounts', '/employee-transactions', '/employee-dashboard']
 
   const projectsGroupActive = projectRelatedPaths.includes(location.pathname)
   const employeesGroupActive = employeeRelatedPaths.includes(location.pathname)
@@ -215,7 +215,7 @@ export function OwnerShell({ session }: OwnerShellProps) {
           <div className="nav-dropdown-menu" role="menu">
             <NavLink to="/employees" role="menuitem">Employees</NavLink>
             <NavLink to="/timesheets" role="menuitem">Timesheets</NavLink>
-            <NavLink to="/expenses" role="menuitem">Expenses</NavLink>
+            <NavLink to="/recipient-accounts" role="menuitem">Recipient Accounts</NavLink>
             <NavLink to="/employee-transactions" role="menuitem">Employee Transactions</NavLink>
             <NavLink to="/employee-dashboard" role="menuitem">Employee Dashboard</NavLink>
           </div>

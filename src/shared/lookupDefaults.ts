@@ -27,14 +27,6 @@ export const LOOKUP_CATEGORIES: {
     ],
   },
   {
-    page: 'Employee Expenses',
-    categories: [
-      { key: 'expense_deduction_mode', label: 'Deduction Mode' },
-      { key: 'expense_borne_by', label: 'Expense Bearer' },
-      { key: 'expense_status', label: 'Expense Status' },
-    ],
-  },
-  {
     page: 'Invoices',
     categories: [
       { key: 'invoice_status', label: 'Invoice Status' },
@@ -51,6 +43,8 @@ export const LOOKUP_CATEGORIES: {
     page: 'Employee Transactions',
     categories: [
       { key: 'employee_transaction_kind', label: 'Transaction kind (labels)' },
+      { key: 'transaction_payment_method', label: 'Payment Method' },
+      { key: 'recipient_account_type', label: 'Recipient Account Type' },
     ],
   },
 ]
@@ -96,20 +90,6 @@ export const LOOKUP_DEFAULTS: Record<string, LookupOption[]> = {
     { code: 'BI_WEEKLY', label: 'Bi-Weekly' },
     { code: 'MONTHLY', label: 'Monthly' },
   ],
-  expense_deduction_mode: [
-    { code: 'PAYROLL_DEDUCTION', label: 'Payroll Deduction' },
-    { code: 'WAGE_DEDUCTION', label: 'Wage Deduction' },
-    { code: 'REIMBURSEMENT', label: 'Reimbursement' },
-  ],
-  expense_borne_by: [
-    { code: 'COMPANY', label: 'Company' },
-    { code: 'EMPLOYEE', label: 'Employee' },
-  ],
-  expense_status: [
-    { code: 'PENDING', label: 'Pending' },
-    { code: 'APPLIED', label: 'Applied' },
-    { code: 'WAIVED', label: 'Waived' },
-  ],
   invoice_status: [
     { code: 'DRAFT', label: 'Draft' },
     { code: 'SENT', label: 'Sent' },
@@ -138,5 +118,39 @@ export const LOOKUP_DEFAULTS: Record<string, LookupOption[]> = {
     { code: 'MANUAL_CREDIT', label: 'Manual credit' },
     { code: 'MANUAL_DEBIT', label: 'Manual debit' },
     { code: 'PAYMENT_TO_EMPLOYEE', label: 'Payment to employee' },
+    { code: 'EMPLOYEE_PAYROLL_DIRECT_DEPOSIT', label: 'Employee Payroll with Direct Deposit' },
+    { code: 'EMPLOYEE_PAYROLL_CHECK', label: 'Employee Payroll with Check' },
+    { code: 'PAYROLL_AMENDMENT_FEES', label: 'Payroll Amendment Fees' },
+    { code: 'EMPLOYER_TAX_FULL_PAYROLL', label: 'Employer Taxes for full payroll' },
+    { code: 'EMPLOYER_TAX_LCA_DEFICIENCY', label: 'Employer Taxes for LCA deficiency' },
+    { code: 'CANDIDATE_PAYMENT_INDIA', label: 'Payment to Candidate in India' },
+    { code: 'CANDIDATE_REPAYMENT_INDIA', label: 'Payment made by candidate in India' },
+    { code: 'HEALTH_INSURANCE_DEDUCTION', label: 'Health Insurance Deduction' },
+    { code: 'H1B_AMENDMENT_FILING_FEES', label: 'H1B Amendment Filing Fees' },
+    { code: 'H1B_AMENDMENT_ATTORNEY_FEES', label: 'H1B Amendment Attorney Fees' },
+    { code: 'H1B_AMENDMENT_EXTENSION_FILING_FEES', label: 'H1B Amendment + Extension Filing Fees' },
+    { code: 'H1B_AMENDMENT_EXTENSION_ATTORNEY_FEES', label: 'H1B Amendment + Extension Attorney Fees' },
+    { code: 'H4_FILING_FEES', label: 'H4 Filing Fees' },
+    { code: 'H4_ATTORNEY_FEES', label: 'H4 Attorney Fees' },
+    { code: 'H4_EAD_FILING_FEES', label: 'H4 EAD Filing Fees' },
+    { code: 'H4_EAD_ATTORNEY_FEES', label: 'H4 EAD Attorney Fees' },
+  ],
+  transaction_payment_method: [
+    { code: 'ZELLE', label: 'Zelle' },
+    { code: 'US_BANK_TO_US_BANK', label: 'US Bank to US Bank' },
+    { code: 'US_BANK_TO_INDIA_BANK', label: 'US Bank to India Bank' },
+    { code: 'INDIA_BANK_TO_INDIA_BANK', label: 'India Bank to India Bank' },
+    { code: 'ACH', label: 'ACH' },
+    { code: 'WIRE', label: 'Wire Transfer' },
+    { code: 'CHECK', label: 'Check' },
+    { code: 'CASH', label: 'Cash' },
+  ],
+  recipient_account_type: [
+    { code: 'EMPLOYER', label: 'Employer' },
+    { code: 'EMPLOYEE', label: 'Employee' },
+    { code: 'INTERMEDIARY', label: 'Intermediary' },
+    { code: 'CANDIDATE', label: 'Candidate' },
+    { code: 'VENDOR', label: 'Vendor' },
+    { code: 'OTHER', label: 'Other' },
   ],
 }

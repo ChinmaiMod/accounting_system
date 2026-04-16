@@ -261,10 +261,20 @@ export function TimesheetsPage() {
     const { data: updatedRows, error: updErr } = await supabase
       .from('employee_transactions')
       .update({
+        transaction_name: 'Timesheet earnings',
         txn_date: me,
         amount: totalEarnings,
+        amount_currency: 'USD',
+        amount_inr: null,
+        exchange_rate: null,
+        amount_usd: totalEarnings,
+        from_account_id: null,
+        to_account_id: null,
+        payment_method: null,
         description,
         notes: null,
+        employee_balance_effect: 'ADD',
+        employer_profitability_effect: 'SUBTRACT',
         updated_at: new Date().toISOString(),
       })
       .eq('business_id', activeBusinessId)
@@ -284,14 +294,23 @@ export function TimesheetsPage() {
           business_id: activeBusinessId,
           employee_id: employeeId,
           project_id: projectId,
+          transaction_name: 'Timesheet earnings',
           txn_date: me,
           period_month: earningMonth,
           entry_kind: 'EMPLOYEE_EARNINGS',
           amount: totalEarnings,
+          amount_currency: 'USD',
+          amount_inr: null,
+          exchange_rate: null,
+          amount_usd: totalEarnings,
+          from_account_id: null,
+          to_account_id: null,
+          payment_method: null,
           description,
           notes: null,
           is_system_generated: true,
-          source_expense_id: null,
+          employee_balance_effect: 'ADD',
+          employer_profitability_effect: 'SUBTRACT',
         })
       if (insErr) { showError(insErr.message); return }
     }

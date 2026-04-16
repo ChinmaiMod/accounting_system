@@ -120,19 +120,6 @@ export type Project = {
   timesheet_frequency: 'WEEKLY' | 'BI_WEEKLY' | 'MONTHLY'
 }
 
-export type EmployeeExpense = {
-  id: string
-  business_id: string
-  employee_id: string
-  expense_date: string
-  expense_type: string
-  amount: number
-  deduction_mode: 'PAYROLL_DEDUCTION' | 'WAGE_DEDUCTION' | 'REIMBURSEMENT'
-  borne_by: 'COMPANY' | 'EMPLOYEE'
-  status: 'PENDING' | 'APPLIED' | 'WAIVED'
-  notes: string | null
-}
-
 export type DailyProfitability = {
   business_id: string
   work_date: string
@@ -166,11 +153,37 @@ export type InvoiceProject = {
   amount: number
 }
 
+export type RecipientAccount = {
+  id: string
+  business_id: string
+  employee_id: string | null
+  account_name: string
+  account_type: 'EMPLOYER' | 'EMPLOYEE' | 'INTERMEDIARY' | 'CANDIDATE' | 'VENDOR' | 'OTHER'
+  payment_identifier: string | null
+  bank_name: string | null
+  country: string | null
+  currency: 'USD' | 'INR'
+  notes: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type TransactionFile = {
+  id: string
+  business_id: string
+  file_name: string
+  file_url: string
+  mime_type: string | null
+  uploaded_at: string
+}
+
 export type EmployeeTransaction = {
   id: string
   business_id: string
   employee_id: string
   project_id: string | null
+  transaction_name: string
   txn_date: string
   period_month: string
   entry_kind:
@@ -180,11 +193,44 @@ export type EmployeeTransaction = {
     | 'MANUAL_CREDIT'
     | 'MANUAL_DEBIT'
     | 'PAYMENT_TO_EMPLOYEE'
+    | 'EMPLOYEE_PAYROLL_DIRECT_DEPOSIT'
+    | 'EMPLOYEE_PAYROLL_CHECK'
+    | 'PAYROLL_AMENDMENT_FEES'
+    | 'EMPLOYER_TAX_FULL_PAYROLL'
+    | 'EMPLOYER_TAX_LCA_DEFICIENCY'
+    | 'CANDIDATE_PAYMENT_INDIA'
+    | 'CANDIDATE_REPAYMENT_INDIA'
+    | 'HEALTH_INSURANCE_DEDUCTION'
+    | 'H1B_AMENDMENT_FILING_FEES'
+    | 'H1B_AMENDMENT_ATTORNEY_FEES'
+    | 'H1B_AMENDMENT_EXTENSION_FILING_FEES'
+    | 'H1B_AMENDMENT_EXTENSION_ATTORNEY_FEES'
+    | 'H4_FILING_FEES'
+    | 'H4_ATTORNEY_FEES'
+    | 'H4_EAD_FILING_FEES'
+    | 'H4_EAD_ATTORNEY_FEES'
   amount: number
+  amount_currency: 'USD' | 'INR'
+  amount_inr: number | null
+  exchange_rate: number | null
+  amount_usd: number
+  from_account_id: string | null
+  to_account_id: string | null
+  payment_method: string | null
+  transaction_screenshot_id: string | null
+  confirmation_screenshot_id: string | null
+  settlement_group_id: string | null
+  parent_transaction_id: string | null
+  layer_order: number
+  expected_commission_percent: number | null
+  actual_commission_percent: number | null
+  expected_commission_amount_usd: number | null
+  actual_commission_amount_usd: number | null
   description: string
   notes: string | null
   is_system_generated: boolean
-  source_expense_id: string | null
+  employee_balance_effect: 'ADD' | 'SUBTRACT'
+  employer_profitability_effect: 'ADD' | 'SUBTRACT'
   created_at: string
   updated_at: string
 }
