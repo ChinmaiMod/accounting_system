@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Employee, EmployeeExpense, EmployeeTransaction } from '../../types/domain'
 import { useOwnerContext } from '../owner/useOwnerContext'
@@ -9,19 +8,63 @@ import { isNonPositive, parseNumber } from '../../shared/numberValidation'
 import { NoticeBanner } from '../../shared/components/NoticeBanner'
 import { PageSection } from '../../shared/components/PageSection'
 import { FormField } from '../../shared/components/FormField'
-import { RowActions } from '../../shared/components/RowActions'
-import { lastDayOfMonthDate, periodFromDate } from '../../shared/fiscalPeriod'
+import { periodFromDate } from '../../shared/fiscalPeriod'
 
 const MANUAL_KINDS: EmployeeTransaction['entry_kind'][] = ['MANUAL_CREDIT', 'MANUAL_DEBIT', 'PAYMENT_TO_EMPLOYEE']
+
+type ManualDraft = {
+  employee_id: string
+  entry_kind: (typeof MANUAL_KINDS)[number]
+  txn_date: string
+  amount: string
+  description: string
+  notes: string
+}
+
+function emptyDraft(yearMonth: string): ManualDraft {
+  return {
+    employee_id: '',
+    entry_kind: 'MANUAL_CREDIT',
+    txn_date: `${yearMonth}-15`,
+    amount: '',
+    description: '',
+    notes: '',
+  }
+}
 
 function kindLabel(kind: string, getOptions: (c: string) => { code: string; label: string }[]) {
   return getOptions('employee_transaction_kind').find((o) => o.code === kind)?.label ?? kind.replace(/_/g, ' ')
 }
 
 function sourceLabel(row: EmployeeTransaction): string {
-  if (row.source_earning_id) return 'Timesheet earning'
+  if (row.entry_kind === 'EMPLOYEE_EARNINGS') return 'Timesheet'
   if (row.source_expense_id) return 'Expense'
   return 'Manual'
+}
+
+function normalizeManualDraft(yearMonth: string, draft: ManualDraft, showError: (msg: string) => void) {
+  if (!draft.employee_id) {
+    showError('Select an employee.')
+    return null
+  }
+
+  const abs = parseNumber(draft.amount)
+  if (isNonPositive(abs)) {
+    showError('Enter an amount greater than 0.')
+    return null
+  }
+
+  const txnDate = draft.txn_date || `${yearMonth}-15`
+  const periodMonth = periodFromDate(txnDate)
+  const signedAmount = draft.entry_kind === 'MANUAL_DEBIT' || draft.entry_kind === 'PAYMENT_TO_EMPLOYEE' ? -abs : abs
+
+  return {
+    txnDate,
+    periodMonth,
+    signedAmount,
+    description: draft.description.trim() || 'Manual entry',
+    notes: draft.notes.trim() || null,
+  }
 }
 
 export function EmployeeTransactionsPage() {
@@ -37,13 +80,11 @@ export function EmployeeTransactionsPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [projectNames, setProjectNames] = useState<Record<string, string>>({})
 
+  const [isAdding, setIsAdding] = useState(false)
+  const [addDraft, setAddDraft] = useState<ManualDraft>(() => emptyDraft(yearMonth))
+
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [formEmployeeId, setFormEmployeeId] = useState('')
-  const [formKind, setFormKind] = useState<typeof MANUAL_KINDS[number]>('MANUAL_CREDIT')
-  const [formTxnDate, setFormTxnDate] = useState('')
-  const [formAmount, setFormAmount] = useState('')
-  const [formDescription, setFormDescription] = useState('')
-  const [formNotes, setFormNotes] = useState('')
+  const [editDraft, setEditDraft] = useState<ManualDraft>(() => emptyDraft(yearMonth))
 
   const periodMonthFilter = `${yearMonth}-01`
 
@@ -52,13 +93,13 @@ export function EmployeeTransactionsPage() {
     let txQ = supabase
       .from('employee_transactions')
       .select(
-        'id,business_id,employee_id,project_id,txn_date,period_month,entry_kind,amount,description,notes,is_system_generated,source_earning_id,source_expense_id,created_at,updated_at',
+        'id,business_id,employee_id,project_id,txn_date,period_month,entry_kind,amount,description,notes,is_system_generated,source_expense_id,created_at,updated_at',
       )
       .eq('business_id', activeBusinessId)
       .eq('period_month', periodMonthFilter)
       .order('txn_date', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(500)
+      .limit(700)
     if (filterEmployeeId) txQ = txQ.eq('employee_id', filterEmployeeId)
 
     const [empR, projR, txR] = await Promise.all([
@@ -88,9 +129,13 @@ export function EmployeeTransactionsPage() {
     loadData()
   }, [loadData])
 
+  useEffect(() => {
+    if (!isAdding) setAddDraft(emptyDraft(yearMonth))
+  }, [yearMonth, isAdding])
+
   const netTotal = useMemo(() => rows.reduce((s, r) => s + Number(r.amount), 0), [rows])
 
-  async function syncFromLedger() {
+  async function syncAppliedExpenses() {
     if (!activeBusinessId) return
     clearNotice()
 
@@ -99,47 +144,11 @@ export function EmployeeTransactionsPage() {
       .delete()
       .eq('business_id', activeBusinessId)
       .eq('is_system_generated', true)
+      .in('entry_kind', ['EXPENSE_DEDUCTION', 'EXPENSE_REIMBURSEMENT'])
 
     if (delErr) {
       showError(delErr.message)
       return
-    }
-
-    const { data: earnings, error: eErr } = await supabase
-      .from('employee_earnings')
-      .select('id,business_id,employee_id,project_id,earning_month,total_hours,hourly_rate,total_earnings')
-      .eq('business_id', activeBusinessId)
-
-    if (eErr) {
-      showError(eErr.message)
-      return
-    }
-
-    const earningRows: Record<string, unknown>[] = []
-    for (const e of earnings ?? []) {
-      const te = Number(e.total_earnings)
-      if (te === 0) continue
-      earningRows.push({
-        business_id: activeBusinessId,
-        employee_id: e.employee_id,
-        project_id: e.project_id,
-        txn_date: lastDayOfMonthDate(e.earning_month),
-        period_month: e.earning_month,
-        entry_kind: 'EARNING_FROM_TIMESHEET',
-        amount: te,
-        description: `Timesheet earnings (${e.total_hours} hrs @ $${Number(e.hourly_rate).toFixed(2)}/hr)`,
-        notes: null,
-        is_system_generated: true,
-        source_earning_id: e.id,
-        source_expense_id: null,
-      })
-    }
-    if (earningRows.length) {
-      const { error } = await supabase.from('employee_transactions').insert(earningRows)
-      if (error) {
-        showError(error.message)
-        return
-      }
     }
 
     const { data: expenses, error: xErr } = await supabase
@@ -177,10 +186,10 @@ export function EmployeeTransactionsPage() {
         description: `${x.expense_type} (${x.expense_date})`,
         notes: x.notes,
         is_system_generated: true,
-        source_earning_id: null,
         source_expense_id: x.id,
       })
     }
+
     if (expenseRows.length) {
       const { error } = await supabase.from('employee_transactions').insert(expenseRows)
       if (error) {
@@ -190,92 +199,129 @@ export function EmployeeTransactionsPage() {
     }
 
     await loadData()
-    showSuccess('Ledger synced from timesheet earnings and applied employee expenses.')
+    showSuccess('Expense transactions synced from applied employee expenses.')
   }
 
-  function resetForm() {
-    setEditingId(null)
-    setFormEmployeeId('')
-    setFormKind('MANUAL_CREDIT')
-    setFormTxnDate('')
-    setFormAmount('')
-    setFormDescription('')
-    setFormNotes('')
+  function startAdd() {
+    clearNotice()
+    setIsAdding(true)
+    setAddDraft(emptyDraft(yearMonth))
   }
 
-  function startEdit(row: EmployeeTransaction) {
-    setEditingId(row.id)
-    setFormEmployeeId(row.employee_id)
-    setFormKind(row.entry_kind as typeof MANUAL_KINDS[number])
-    setFormTxnDate(row.txn_date)
-    setFormAmount(String(Math.abs(Number(row.amount))))
-    setFormDescription(row.description)
-    setFormNotes(row.notes ?? '')
+  function cancelAdd() {
+    setIsAdding(false)
+    setAddDraft(emptyDraft(yearMonth))
   }
 
-  async function saveManual(e: FormEvent) {
-    e.preventDefault()
+  async function saveAdd() {
     if (!activeBusinessId) return
     clearNotice()
-    if (!formEmployeeId) {
-      showError('Select an employee.')
-      return
-    }
-    const abs = parseNumber(formAmount)
-    if (isNonPositive(abs)) {
-      showError('Enter an amount greater than 0.')
-      return
-    }
-    let signed = abs
-    if (formKind === 'MANUAL_DEBIT' || formKind === 'PAYMENT_TO_EMPLOYEE') signed = -abs
 
-    const txnDate = formTxnDate || `${yearMonth}-15`
-    const period_month = periodFromDate(txnDate)
+    const normalized = normalizeManualDraft(yearMonth, addDraft, showError)
+    if (!normalized) return
 
     const payload = {
       business_id: activeBusinessId,
-      employee_id: formEmployeeId,
+      employee_id: addDraft.employee_id,
       project_id: null,
-      txn_date: txnDate,
-      period_month,
-      entry_kind: formKind,
-      amount: signed,
-      description: formDescription.trim() || 'Manual entry',
-      notes: formNotes.trim() || null,
+      txn_date: normalized.txnDate,
+      period_month: normalized.periodMonth,
+      entry_kind: addDraft.entry_kind,
+      amount: normalized.signedAmount,
+      description: normalized.description,
+      notes: normalized.notes,
       is_system_generated: false,
-      source_earning_id: null,
       source_expense_id: null,
+    }
+
+    const { error } = await supabase.from('employee_transactions').insert(payload)
+    if (error) {
+      showError(error.message)
+      return
+    }
+
+    setIsAdding(false)
+    setAddDraft(emptyDraft(yearMonth))
+    await loadData()
+    showSuccess('Transaction added.')
+  }
+
+  function startEdit(row: EmployeeTransaction) {
+    if (row.is_system_generated) return
+    const kind = MANUAL_KINDS.includes(row.entry_kind as (typeof MANUAL_KINDS)[number])
+      ? (row.entry_kind as (typeof MANUAL_KINDS)[number])
+      : 'MANUAL_CREDIT'
+
+    setEditingId(row.id)
+    setEditDraft({
+      employee_id: row.employee_id,
+      entry_kind: kind,
+      txn_date: row.txn_date,
+      amount: String(Math.abs(Number(row.amount))),
+      description: row.description,
+      notes: row.notes ?? '',
+    })
+    clearNotice()
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditDraft(emptyDraft(yearMonth))
+  }
+
+  async function saveEdit(rowId: string) {
+    if (!activeBusinessId) return
+    clearNotice()
+
+    const normalized = normalizeManualDraft(yearMonth, editDraft, showError)
+    if (!normalized) return
+
+    const payload = {
+      employee_id: editDraft.employee_id,
+      project_id: null,
+      txn_date: normalized.txnDate,
+      period_month: normalized.periodMonth,
+      entry_kind: editDraft.entry_kind,
+      amount: normalized.signedAmount,
+      description: normalized.description,
+      notes: normalized.notes,
       updated_at: new Date().toISOString(),
     }
 
-    if (editingId) {
-      const { error } = await supabase.from('employee_transactions').update(payload).eq('id', editingId).eq('is_system_generated', false)
-      if (error) {
-        showError(error.message)
-        return
-      }
-      showSuccess('Transaction updated.')
-    } else {
-      const { error } = await supabase.from('employee_transactions').insert(payload)
-      if (error) {
-        showError(error.message)
-        return
-      }
-      showSuccess('Transaction added.')
+    const { error } = await supabase
+      .from('employee_transactions')
+      .update(payload)
+      .eq('id', rowId)
+      .eq('business_id', activeBusinessId)
+      .eq('is_system_generated', false)
+
+    if (error) {
+      showError(error.message)
+      return
     }
-    resetForm()
+
+    setEditingId(null)
+    setEditDraft(emptyDraft(yearMonth))
     await loadData()
+    showSuccess('Transaction updated.')
   }
 
   async function deleteRow(row: EmployeeTransaction) {
     if (row.is_system_generated) return
     if (!confirmAction('Delete this transaction?')) return
-    const { error } = await supabase.from('employee_transactions').delete().eq('id', row.id).eq('is_system_generated', false)
+
+    const { error } = await supabase
+      .from('employee_transactions')
+      .delete()
+      .eq('id', row.id)
+      .eq('is_system_generated', false)
+
     if (error) {
       showError(error.message)
       return
     }
-    if (editingId === row.id) resetForm()
+
+    if (editingId === row.id) cancelEdit()
     await loadData()
     showSuccess('Transaction deleted.')
   }
@@ -292,14 +338,25 @@ export function EmployeeTransactionsPage() {
     <PageSection
       title="Employee Transactions"
       actions={
-        <button type="button" className="btn-secondary btn-sm" onClick={() => syncFromLedger()}>
-          Sync from earnings &amp; expenses
-        </button>
+        <div className="flex-row gap-xs">
+          <button type="button" className="btn-secondary btn-sm" onClick={() => syncAppliedExpenses()}>
+            Sync applied expenses
+          </button>
+          {!isAdding ? (
+            <button type="button" className="btn-primary btn-sm" onClick={() => startAdd()}>
+              + Add row
+            </button>
+          ) : (
+            <button type="button" className="btn-secondary btn-sm" onClick={() => cancelAdd()}>
+              Cancel add
+            </button>
+          )}
+        </div>
       }
     >
       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
-        Phase 2 ledger: positive amounts increase the employee&rsquo;s net position (earnings, reimbursements, credits); negative amounts
-        reduce it (deductions, payments). System rows are rebuilt when you sync; manual entries stay unless you delete them.
+        Spreadsheet view: all entries for the selected month are shown below. Timesheet earnings are system-generated as
+        <strong> EMPLOYEE_EARNINGS</strong>; manual rows can be added and edited inline.
       </p>
 
       <div className="form-grid" style={{ marginBottom: '1rem' }}>
@@ -316,45 +373,6 @@ export function EmployeeTransactionsPage() {
         </FormField>
       </div>
 
-      <form onSubmit={saveManual} className="form-grid" style={{ marginBottom: '1.25rem', padding: '0.75rem', background: 'var(--color-accent-light)', borderRadius: 'var(--radius-md)' }}>
-        <h3 style={{ gridColumn: '1 / -1', margin: 0, fontSize: '0.95rem' }}>{editingId ? 'Edit manual transaction' : 'Add manual transaction'}</h3>
-        <FormField label="Employee">
-          <select value={formEmployeeId} onChange={(ev) => setFormEmployeeId(ev.target.value)} required>
-            <option value="">Select</option>
-            {employees.map((em) => (
-              <option key={em.id} value={em.id}>{em.full_name}</option>
-            ))}
-          </select>
-        </FormField>
-        <FormField label="Kind">
-          <select value={formKind} onChange={(ev) => setFormKind(ev.target.value as (typeof MANUAL_KINDS)[number])}>
-            {MANUAL_KINDS.map((k) => (
-              <option key={k} value={k}>{kindLabel(k, getOptions)}</option>
-            ))}
-          </select>
-        </FormField>
-        <FormField label="Transaction date">
-          <input type="date" value={formTxnDate} onChange={(ev) => setFormTxnDate(ev.target.value)} />
-        </FormField>
-        <FormField label="Amount (positive number)">
-          <input type="number" min="0.01" step="0.01" value={formAmount} onChange={(ev) => setFormAmount(ev.target.value)} required />
-        </FormField>
-        <FormField label="Description">
-          <input value={formDescription} onChange={(ev) => setFormDescription(ev.target.value)} required />
-        </FormField>
-        <FormField label="Notes">
-          <input value={formNotes} onChange={(ev) => setFormNotes(ev.target.value)} />
-        </FormField>
-        <div className="field" style={{ justifyContent: 'flex-end', alignItems: 'flex-end', gap: '0.5rem' }}>
-          {editingId && (
-            <button type="button" className="btn-secondary btn-sm" onClick={() => resetForm()}>
-              Cancel edit
-            </button>
-          )}
-          <button type="submit" className="btn-primary">{editingId ? 'Save changes' : 'Add transaction'}</button>
-        </div>
-      </form>
-
       <NoticeBanner message={message} type={type} />
 
       <div className="tableWrap">
@@ -364,43 +382,150 @@ export function EmployeeTransactionsPage() {
               <th>Date</th>
               <th>Employee</th>
               <th>Kind</th>
-              <th>Source</th>
               <th>Project</th>
               <th style={{ textAlign: 'right' }}>Amount</th>
               <th>Description</th>
+              <th>Notes</th>
+              <th>Source</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td>{row.txn_date}</td>
-                <td style={{ fontWeight: 600 }}>{empName(row.employee_id)}</td>
-                <td><span className="badge badge-neutral">{kindLabel(row.entry_kind, getOptions)}</span></td>
-                <td>{sourceLabel(row)}</td>
-                <td>{row.project_id ? projectNames[row.project_id] ?? '—' : '—'}</td>
-                <td style={{
-                  textAlign: 'right',
-                  fontWeight: 600,
-                  color: Number(row.amount) >= 0 ? '#0d6b3d' : '#b42318',
-                }}
-                >
-                  {Number(row.amount) >= 0 ? '+' : ''}{Number(row.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </td>
-                <td style={{ fontSize: '0.8rem' }}>{row.description}</td>
+            {isAdding && (
+              <tr style={{ background: '#fffef5' }}>
                 <td>
-                  {!row.is_system_generated ? (
-                    <RowActions onEdit={() => startEdit(row)} onDelete={() => deleteRow(row)} />
-                  ) : (
-                    <span className="text-muted" style={{ fontSize: '0.75rem' }}>Synced</span>
-                  )}
+                  <input type="date" value={addDraft.txn_date} onChange={(ev) => setAddDraft((d) => ({ ...d, txn_date: ev.target.value }))} />
+                </td>
+                <td>
+                  <select value={addDraft.employee_id} onChange={(ev) => setAddDraft((d) => ({ ...d, employee_id: ev.target.value }))}>
+                    <option value="">Select</option>
+                    {employees.map((em) => (
+                      <option key={em.id} value={em.id}>{em.full_name}</option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <select value={addDraft.entry_kind} onChange={(ev) => setAddDraft((d) => ({ ...d, entry_kind: ev.target.value as (typeof MANUAL_KINDS)[number] }))}>
+                    {MANUAL_KINDS.map((kind) => (
+                      <option key={kind} value={kind}>{kindLabel(kind, getOptions)}</option>
+                    ))}
+                  </select>
+                </td>
+                <td>—</td>
+                <td>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={addDraft.amount}
+                    onChange={(ev) => setAddDraft((d) => ({ ...d, amount: ev.target.value }))}
+                    style={{ width: '120px', textAlign: 'right' }}
+                  />
+                </td>
+                <td>
+                  <input value={addDraft.description} onChange={(ev) => setAddDraft((d) => ({ ...d, description: ev.target.value }))} />
+                </td>
+                <td>
+                  <input value={addDraft.notes} onChange={(ev) => setAddDraft((d) => ({ ...d, notes: ev.target.value }))} />
+                </td>
+                <td>Manual</td>
+                <td>
+                  <div className="flex-row gap-xs" style={{ display: 'inline-flex' }}>
+                    <button type="button" className="btn-primary btn-sm" onClick={() => saveAdd()}>Save</button>
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => cancelAdd()}>Cancel</button>
+                  </div>
                 </td>
               </tr>
-            ))}
-            {rows.length === 0 && (
+            )}
+
+            {rows.map((row) => {
+              const isEditing = editingId === row.id && !row.is_system_generated
+              if (isEditing) {
+                return (
+                  <tr key={row.id} style={{ background: '#fffef5' }}>
+                    <td>
+                      <input type="date" value={editDraft.txn_date} onChange={(ev) => setEditDraft((d) => ({ ...d, txn_date: ev.target.value }))} />
+                    </td>
+                    <td>
+                      <select value={editDraft.employee_id} onChange={(ev) => setEditDraft((d) => ({ ...d, employee_id: ev.target.value }))}>
+                        <option value="">Select</option>
+                        {employees.map((em) => (
+                          <option key={em.id} value={em.id}>{em.full_name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select value={editDraft.entry_kind} onChange={(ev) => setEditDraft((d) => ({ ...d, entry_kind: ev.target.value as (typeof MANUAL_KINDS)[number] }))}>
+                        {MANUAL_KINDS.map((kind) => (
+                          <option key={kind} value={kind}>{kindLabel(kind, getOptions)}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>—</td>
+                    <td>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={editDraft.amount}
+                        onChange={(ev) => setEditDraft((d) => ({ ...d, amount: ev.target.value }))}
+                        style={{ width: '120px', textAlign: 'right' }}
+                      />
+                    </td>
+                    <td>
+                      <input value={editDraft.description} onChange={(ev) => setEditDraft((d) => ({ ...d, description: ev.target.value }))} />
+                    </td>
+                    <td>
+                      <input value={editDraft.notes} onChange={(ev) => setEditDraft((d) => ({ ...d, notes: ev.target.value }))} />
+                    </td>
+                    <td>Manual</td>
+                    <td>
+                      <div className="flex-row gap-xs" style={{ display: 'inline-flex' }}>
+                        <button type="button" className="btn-primary btn-sm" onClick={() => saveEdit(row.id)}>Save</button>
+                        <button type="button" className="btn-secondary btn-sm" onClick={() => cancelEdit()}>Cancel</button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }
+
+              return (
+                <tr key={row.id}>
+                  <td>{row.txn_date}</td>
+                  <td style={{ fontWeight: 600 }}>{empName(row.employee_id)}</td>
+                  <td><span className="badge badge-neutral">{kindLabel(row.entry_kind, getOptions)}</span></td>
+                  <td>{row.project_id ? projectNames[row.project_id] ?? '—' : '—'}</td>
+                  <td
+                    style={{
+                      textAlign: 'right',
+                      fontWeight: 600,
+                      color: Number(row.amount) >= 0 ? '#0d6b3d' : '#b42318',
+                    }}
+                  >
+                    {Number(row.amount) >= 0 ? '+' : ''}
+                    {Number(row.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ fontSize: '0.8rem' }}>{row.description}</td>
+                  <td style={{ fontSize: '0.8rem' }}>{row.notes ?? '—'}</td>
+                  <td>{sourceLabel(row)}</td>
+                  <td>
+                    {!row.is_system_generated ? (
+                      <div className="flex-row gap-xs" style={{ display: 'inline-flex' }}>
+                        <button type="button" className="btn-secondary btn-sm" onClick={() => startEdit(row)}>Edit</button>
+                        <button type="button" className="btn-danger btn-sm" onClick={() => deleteRow(row)}>Delete</button>
+                      </div>
+                    ) : (
+                      <span className="text-muted" style={{ fontSize: '0.75rem' }}>Synced</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+
+            {!isAdding && rows.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--color-text-muted)' }}>
-                  No transactions for this period{filterEmployeeId ? ' and employee' : ''}. Sync from earnings &amp; expenses or add manual entries.
+                <td colSpan={9} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--color-text-muted)' }}>
+                  No transactions for this period{filterEmployeeId ? ' and employee' : ''}. Add a row or sync applied expenses.
                 </td>
               </tr>
             )}
@@ -412,7 +537,8 @@ export function EmployeeTransactionsPage() {
         <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)' }}>
           <strong>Net for visible rows: </strong>
           <span style={{ fontWeight: 700, color: netTotal >= 0 ? 'var(--color-primary)' : '#b42318' }}>
-            {netTotal >= 0 ? '+' : ''}{netTotal.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+            {netTotal >= 0 ? '+' : ''}
+            {netTotal.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
           </span>
         </div>
       )}

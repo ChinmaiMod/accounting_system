@@ -20,7 +20,7 @@ type ProjLookup = {
 type EcLookup = { id: string; name: string }
 type VendLookup = { id: string; name: string; invoice_frequency: string; payment_terms: string }
 
-type EarningLookup = { id: string; total_hours: number; hourly_rate: number; total_earnings: number }
+type EarningLookup = { id: string; total_earnings: number }
 
 type GridRow = {
   key: string
@@ -105,18 +105,24 @@ export function TimesheetsPage() {
     const me = wks[wks.length - 1].endDate
 
     const earningMonth = `${yearMonth}-01`
-    const [eR, pR, ecR, vR, tR, iR, earnR] = await Promise.all([
+    const [eR, pR, ecR, vR, tR, iR, earnTxR] = await Promise.all([
       supabase.from('employees').select('id,full_name,email,employee_type').eq('business_id', activeBusinessId).order('full_name'),
       supabase.from('projects').select('id,employee_id,end_client_id,vendor_id,name,start_date,end_date,employee_project_rate,timesheet_frequency').eq('business_id', activeBusinessId),
       supabase.from('end_clients').select('id,name').eq('business_id', activeBusinessId),
       supabase.from('vendors').select('id,name,invoice_frequency,payment_terms').eq('business_id', activeBusinessId),
       supabase.from('timesheets').select('id,employee_id,project_id,work_date,hours').eq('business_id', activeBusinessId).gte('work_date', ms).lte('work_date', me),
       supabase.from('invoices').select('invoice_number,invoice_projects(project_id)').eq('business_id', activeBusinessId),
-      supabase.from('employee_earnings').select('id,employee_id,project_id,total_hours,hourly_rate,total_earnings').eq('business_id', activeBusinessId).eq('earning_month', earningMonth),
+      supabase
+        .from('employee_transactions')
+        .select('id,employee_id,project_id,amount')
+        .eq('business_id', activeBusinessId)
+        .eq('period_month', earningMonth)
+        .eq('entry_kind', 'EMPLOYEE_EARNINGS')
+        .eq('is_system_generated', true),
     ])
 
-    if (eR.error || pR.error || ecR.error || vR.error || tR.error || iR.error || earnR.error) {
-      showError(eR.error?.message ?? pR.error?.message ?? ecR.error?.message ?? vR.error?.message ?? tR.error?.message ?? iR.error?.message ?? earnR.error?.message ?? 'Load failed')
+    if (eR.error || pR.error || ecR.error || vR.error || tR.error || iR.error || earnTxR.error) {
+      showError(eR.error?.message ?? pR.error?.message ?? ecR.error?.message ?? vR.error?.message ?? tR.error?.message ?? iR.error?.message ?? earnTxR.error?.message ?? 'Load failed')
       return
     }
 
@@ -141,11 +147,12 @@ export function TimesheetsPage() {
     }
 
     const earnMap = new Map<string, EarningLookup>()
-    for (const e of (earnR.data ?? []) as any[]) {
-      earnMap.set(`${e.employee_id}::${e.project_id}`, {
-        id: e.id, total_hours: Number(e.total_hours),
-        hourly_rate: Number(e.hourly_rate), total_earnings: Number(e.total_earnings),
-      })
+    for (const e of (earnTxR.data ?? []) as any[]) {
+      if (!e.project_id) continue
+      const key = `${e.employee_id}::${e.project_id}`
+      const existing = earnMap.get(key)
+      const total = (existing?.total_earnings ?? 0) + Number(e.amount)
+      earnMap.set(key, { id: existing?.id ?? e.id, total_earnings: total })
     }
 
     const tsMap: Record<string, Record<string, WeekEntry>> = {}
@@ -227,7 +234,7 @@ export function TimesheetsPage() {
     const earningMonth = `${yearMonth}-01`
 
     const { data: tsRows, error: tsErr } = await supabase
-      .from('timesheets').select('id,hours')
+      .from('timesheets').select('hours')
       .eq('business_id', activeBusinessId)
       .eq('employee_id', employeeId)
       .eq('project_id', projectId)
@@ -237,40 +244,56 @@ export function TimesheetsPage() {
 
     const totalHours = (tsRows ?? []).reduce((s, r) => s + Number(r.hours), 0)
     const totalEarnings = Math.round(totalHours * rate * 100) / 100
+    const description = `Timesheet earnings (${totalHours.toFixed(2)} hrs @ $${rate.toFixed(2)}/hr)`
 
     if (totalHours === 0) {
-      await supabase.from('employee_earnings').delete()
+      const { error: delErr } = await supabase.from('employee_transactions').delete()
         .eq('business_id', activeBusinessId)
         .eq('employee_id', employeeId)
         .eq('project_id', projectId)
-        .eq('earning_month', earningMonth)
+        .eq('period_month', earningMonth)
+        .eq('entry_kind', 'EMPLOYEE_EARNINGS')
+        .eq('is_system_generated', true)
+      if (delErr) showError(delErr.message)
       return
     }
 
-    const { data: upserted, error: earnErr } = await supabase
-      .from('employee_earnings')
-      .upsert({
-        business_id: activeBusinessId,
-        employee_id: employeeId,
-        project_id: projectId,
-        earning_month: earningMonth,
-        total_hours: totalHours,
-        hourly_rate: rate,
-        total_earnings: totalEarnings,
+    const { data: updatedRows, error: updErr } = await supabase
+      .from('employee_transactions')
+      .update({
+        txn_date: me,
+        amount: totalEarnings,
+        description,
+        notes: null,
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'business_id,employee_id,project_id,earning_month' })
+      })
+      .eq('business_id', activeBusinessId)
+      .eq('employee_id', employeeId)
+      .eq('project_id', projectId)
+      .eq('period_month', earningMonth)
+      .eq('entry_kind', 'EMPLOYEE_EARNINGS')
+      .eq('is_system_generated', true)
       .select('id')
-      .single()
 
-    if (earnErr) { showError(earnErr.message); return }
+    if (updErr) { showError(updErr.message); return }
 
-    if (upserted) {
-      const tsIds = (tsRows ?? []).map(r => r.id)
-      if (tsIds.length) {
-        await supabase.from('timesheets')
-          .update({ earning_id: upserted.id })
-          .in('id', tsIds)
-      }
+    if (!updatedRows || updatedRows.length === 0) {
+      const { error: insErr } = await supabase
+        .from('employee_transactions')
+        .insert({
+          business_id: activeBusinessId,
+          employee_id: employeeId,
+          project_id: projectId,
+          txn_date: me,
+          period_month: earningMonth,
+          entry_kind: 'EMPLOYEE_EARNINGS',
+          amount: totalEarnings,
+          description,
+          notes: null,
+          is_system_generated: true,
+          source_expense_id: null,
+        })
+      if (insErr) { showError(insErr.message); return }
     }
   }
 

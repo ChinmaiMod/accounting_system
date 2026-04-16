@@ -44,7 +44,6 @@ export type Timesheet = {
   work_type: 'REGULAR' | 'OVERTIME' | 'HOLIDAY' | 'HOLIDAY_OT'
   hours: number
   travel_hours: number
-  earning_id: string | null
 }
 
 export type Invoice = {
@@ -175,7 +174,7 @@ export type EmployeeTransaction = {
   txn_date: string
   period_month: string
   entry_kind:
-    | 'EARNING_FROM_TIMESHEET'
+    | 'EMPLOYEE_EARNINGS'
     | 'EXPENSE_DEDUCTION'
     | 'EXPENSE_REIMBURSEMENT'
     | 'MANUAL_CREDIT'
@@ -185,21 +184,7 @@ export type EmployeeTransaction = {
   description: string
   notes: string | null
   is_system_generated: boolean
-  source_earning_id: string | null
   source_expense_id: string | null
-  created_at: string
-  updated_at: string
-}
-
-export type EmployeeEarning = {
-  id: string
-  business_id: string
-  employee_id: string
-  project_id: string
-  earning_month: string
-  total_hours: number
-  hourly_rate: number
-  total_earnings: number
   created_at: string
   updated_at: string
 }

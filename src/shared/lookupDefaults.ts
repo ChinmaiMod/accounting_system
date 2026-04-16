@@ -132,7 +132,7 @@ export const LOOKUP_DEFAULTS: Record<string, LookupOption[]> = {
     { code: 'HOLIDAY_OT', label: 'Holiday OT' },
   ],
   employee_transaction_kind: [
-    { code: 'EARNING_FROM_TIMESHEET', label: 'Earning (timesheet)' },
+    { code: 'EMPLOYEE_EARNINGS', label: 'Employee earnings' },
     { code: 'EXPENSE_DEDUCTION', label: 'Expense deduction' },
     { code: 'EXPENSE_REIMBURSEMENT', label: 'Expense reimbursement' },
     { code: 'MANUAL_CREDIT', label: 'Manual credit' },
