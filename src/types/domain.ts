@@ -229,8 +229,6 @@ export type EmployeeTransaction = {
   description: string
   notes: string | null
   is_system_generated: boolean
-  employee_balance_effect: 'ADD' | 'SUBTRACT'
-  employer_profitability_effect: 'ADD' | 'SUBTRACT'
   created_at: string
   updated_at: string
 }
@@ -243,4 +241,6 @@ export type LookupValue = {
   label: string
   sort_order: number
   is_active: boolean
+  employee_balance_effect: 'ADD' | 'SUBTRACT' | null
+  employer_profitability_effect: 'ADD' | 'SUBTRACT' | null
 }

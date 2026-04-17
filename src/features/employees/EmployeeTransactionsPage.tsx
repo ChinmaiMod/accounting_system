@@ -10,7 +10,7 @@ import { PageSection } from '../../shared/components/PageSection'
 import { FormField } from '../../shared/components/FormField'
 import { periodFromDate } from '../../shared/fiscalPeriod'
 
-type EffectDirection = EmployeeTransaction['employee_balance_effect']
+type EffectDirection = 'ADD' | 'SUBTRACT'
 type TransactionKind = EmployeeTransaction['entry_kind']
 
 type FileDraft = {
@@ -19,7 +19,12 @@ type FileDraft = {
   mime_type: string
 }
 
-type Draft = {
+type RowDraft = {
+  id: string
+  isNew: boolean
+  isSystem: boolean
+  existingScreenshotId: string | null
+  existingConfirmationId: string | null
   transaction_name: string
   employee_id: string
   entry_kind: TransactionKind
@@ -31,8 +36,6 @@ type Draft = {
   amount_inr: string
   exchange_rate: string
   amount_usd: string
-  employee_balance_effect: EffectDirection
-  employer_profitability_effect: EffectDirection
   settlement_group_id: string
   parent_transaction_id: string
   layer_order: string
@@ -99,36 +102,33 @@ const FALLBACK_PAYMENT_METHODS = [
   { code: 'CASH', label: 'Cash' },
 ]
 
+const cellInp: React.CSSProperties = {
+  width: '100%',
+  border: 'none',
+  background: 'transparent',
+  padding: '0.4rem 0.45rem',
+  fontSize: 'inherit',
+  fontFamily: 'inherit',
+  boxSizing: 'border-box',
+}
+
+let tempIdCounter = 0
+function nextTempId() {
+  tempIdCounter += 1
+  return `new-${tempIdCounter}-${Date.now()}`
+}
+
 function emptyFileDraft(): FileDraft {
   return { file_name: '', file_url: '', mime_type: '' }
 }
 
-function defaultEffectsForKind(kind: TransactionKind): { employee_balance_effect: EffectDirection; employer_profitability_effect: EffectDirection } {
-  switch (kind) {
-    case 'EMPLOYEE_EARNINGS':
-      return { employee_balance_effect: 'ADD', employer_profitability_effect: 'SUBTRACT' }
-    case 'EXPENSE_DEDUCTION':
-      return { employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'ADD' }
-    case 'EXPENSE_REIMBURSEMENT':
-      return { employee_balance_effect: 'ADD', employer_profitability_effect: 'SUBTRACT' }
-    case 'MANUAL_CREDIT':
-      return { employee_balance_effect: 'ADD', employer_profitability_effect: 'SUBTRACT' }
-    case 'MANUAL_DEBIT':
-      return { employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'ADD' }
-    case 'PAYMENT_TO_EMPLOYEE':
-      return { employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'ADD' }
-    case 'CANDIDATE_REPAYMENT_INDIA':
-      return { employee_balance_effect: 'ADD', employer_profitability_effect: 'ADD' }
-    case 'HEALTH_INSURANCE_DEDUCTION':
-      return { employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'ADD' }
-    default:
-      return { employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' }
-  }
-}
-
-function emptyDraft(yearMonth: string): Draft {
-  const defaults = defaultEffectsForKind('EMPLOYEE_PAYROLL_DIRECT_DEPOSIT')
+function emptyDraft(yearMonth: string): RowDraft {
   return {
+    id: nextTempId(),
+    isNew: true,
+    isSystem: false,
+    existingScreenshotId: null,
+    existingConfirmationId: null,
     transaction_name: '',
     employee_id: '',
     entry_kind: 'EMPLOYEE_PAYROLL_DIRECT_DEPOSIT',
@@ -140,8 +140,6 @@ function emptyDraft(yearMonth: string): Draft {
     amount_inr: '',
     exchange_rate: '',
     amount_usd: '',
-    employee_balance_effect: defaults.employee_balance_effect,
-    employer_profitability_effect: defaults.employer_profitability_effect,
     settlement_group_id: '',
     parent_transaction_id: '',
     layer_order: '1',
@@ -151,6 +149,39 @@ function emptyDraft(yearMonth: string): Draft {
     actual_commission_amount_usd: '',
     description: '',
     notes: '',
+    transactionScreenshot: emptyFileDraft(),
+    confirmationScreenshot: emptyFileDraft(),
+    supportingFiles: [],
+  }
+}
+
+function draftFromRow(row: EmployeeTransaction): RowDraft {
+  return {
+    id: row.id,
+    isNew: false,
+    isSystem: row.is_system_generated,
+    existingScreenshotId: row.transaction_screenshot_id,
+    existingConfirmationId: row.confirmation_screenshot_id,
+    transaction_name: row.transaction_name,
+    employee_id: row.employee_id,
+    entry_kind: row.entry_kind,
+    txn_date: row.txn_date,
+    from_account_id: row.from_account_id ?? '',
+    to_account_id: row.to_account_id ?? '',
+    payment_method: row.payment_method ?? '',
+    amount_currency: row.amount_currency,
+    amount_inr: row.amount_inr != null ? String(row.amount_inr) : '',
+    exchange_rate: row.exchange_rate != null ? String(row.exchange_rate) : '',
+    amount_usd: String(row.amount_usd ?? row.amount),
+    settlement_group_id: row.settlement_group_id ?? '',
+    parent_transaction_id: row.parent_transaction_id ?? '',
+    layer_order: String(row.layer_order ?? 1),
+    expected_commission_percent: row.expected_commission_percent != null ? String(row.expected_commission_percent) : '',
+    actual_commission_percent: row.actual_commission_percent != null ? String(row.actual_commission_percent) : '',
+    expected_commission_amount_usd: row.expected_commission_amount_usd != null ? String(row.expected_commission_amount_usd) : '',
+    actual_commission_amount_usd: row.actual_commission_amount_usd != null ? String(row.actual_commission_amount_usd) : '',
+    description: row.description,
+    notes: row.notes ?? '',
     transactionScreenshot: emptyFileDraft(),
     confirmationScreenshot: emptyFileDraft(),
     supportingFiles: [],
@@ -167,11 +198,8 @@ function sourceLabelByKind(kind: TransactionKind): string {
   return 'Manual'
 }
 
-function effectBadge(effect: EffectDirection) {
-  return effect === 'ADD' ? '+ Add' : '- Subtract'
-}
-
-function signedImpact(amount: number, effect: EffectDirection) {
+function signedImpact(amount: number, effect: EffectDirection | null | undefined) {
+  if (effect == null) return 0
   return effect === 'ADD' ? amount : -amount
 }
 
@@ -195,7 +223,7 @@ function fileNameFromUrl(url: string): string {
   return parts[parts.length - 1] || 'proof-file'
 }
 
-function computeDraftUsd(draft: Draft): number {
+function computeDraftUsd(draft: RowDraft): number {
   if (draft.amount_currency === 'INR') {
     const inr = parseNumber(draft.amount_inr)
     const rate = parseNumber(draft.exchange_rate)
@@ -205,7 +233,7 @@ function computeDraftUsd(draft: Draft): number {
   return round2(parseNumber(draft.amount_usd))
 }
 
-function normalizeDraft(yearMonth: string, draft: Draft, showError: (msg: string) => void) {
+function normalizeDraft(yearMonth: string, draft: RowDraft, showError: (msg: string) => void) {
   if (!draft.transaction_name.trim()) {
     showError('Transaction name is required.')
     return null
@@ -255,7 +283,7 @@ function normalizeDraft(yearMonth: string, draft: Draft, showError: (msg: string
 
   const layerOrder = Math.max(1, Math.floor(parseNumber(draft.layer_order || '1')))
 
-  const normalized = {
+  return {
     txnDate,
     periodMonth,
     amountInr,
@@ -271,8 +299,6 @@ function normalizeDraft(yearMonth: string, draft: Draft, showError: (msg: string
     settlementGroupId: draft.settlement_group_id.trim() || null,
     parentTransactionId: draft.parent_transaction_id || null,
   }
-
-  return normalized
 }
 
 export function EmployeeTransactionsPage() {
@@ -291,8 +317,10 @@ export function EmployeeTransactionsPage() {
   const [fileMap, setFileMap] = useState<Record<string, TransactionFile>>({})
   const [attachmentCounts, setAttachmentCounts] = useState<Record<string, number>>({})
 
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [formDraft, setFormDraft] = useState<Draft>(() => emptyDraft(yearMonth))
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({})
+  const [newRowIds, setNewRowIds] = useState<string[]>([])
+  const [drawerRowId, setDrawerRowId] = useState<string | null>(null)
+  const [savingId, setSavingId] = useState<string | null>(null)
 
   const periodMonthFilter = `${yearMonth}-01`
 
@@ -302,7 +330,7 @@ export function EmployeeTransactionsPage() {
     let txQ = supabase
       .from('employee_transactions')
       .select(
-        'id,business_id,employee_id,project_id,transaction_name,txn_date,period_month,entry_kind,amount,amount_currency,amount_inr,exchange_rate,amount_usd,from_account_id,to_account_id,payment_method,transaction_screenshot_id,confirmation_screenshot_id,settlement_group_id,parent_transaction_id,layer_order,expected_commission_percent,actual_commission_percent,expected_commission_amount_usd,actual_commission_amount_usd,description,notes,is_system_generated,employee_balance_effect,employer_profitability_effect,created_at,updated_at',
+        'id,business_id,employee_id,project_id,transaction_name,txn_date,period_month,entry_kind,amount,amount_currency,amount_inr,exchange_rate,amount_usd,from_account_id,to_account_id,payment_method,transaction_screenshot_id,confirmation_screenshot_id,settlement_group_id,parent_transaction_id,layer_order,expected_commission_percent,actual_commission_percent,expected_commission_amount_usd,actual_commission_amount_usd,description,notes,is_system_generated,created_at,updated_at',
       )
       .eq('business_id', activeBusinessId)
       .eq('period_month', periodMonthFilter)
@@ -337,6 +365,13 @@ export function EmployeeTransactionsPage() {
     setEmployees((empR.data ?? []) as Employee[])
     setAccounts((accR.data ?? []) as RecipientAccount[])
     setRows(txRows)
+
+    setDrafts((prev) => {
+      const next: Record<string, RowDraft> = {}
+      for (const row of txRows) next[row.id] = draftFromRow(row)
+      for (const tempId of newRowIds) if (prev[tempId]) next[tempId] = prev[tempId]
+      return next
+    })
 
     const txIds = txRows.map((r) => r.id)
     const directFileIds = new Set<string>()
@@ -382,15 +417,12 @@ export function EmployeeTransactionsPage() {
     const counts: Record<string, number> = {}
     for (const l of linkRows) counts[l.transaction_id] = (counts[l.transaction_id] ?? 0) + 1
     setAttachmentCounts(counts)
-  }, [activeBusinessId, periodMonthFilter, filterEmployeeId, showError])
+  }, [activeBusinessId, periodMonthFilter, filterEmployeeId, showError, newRowIds])
 
   useEffect(() => {
     loadData()
-  }, [loadData])
-
-  useEffect(() => {
-    if (!editingId) setFormDraft(emptyDraft(yearMonth))
-  }, [yearMonth, editingId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBusinessId, periodMonthFilter, filterEmployeeId])
 
   const accountMap = useMemo(() => {
     const map: Record<string, RecipientAccount> = {}
@@ -398,17 +430,29 @@ export function EmployeeTransactionsPage() {
     return map
   }, [accounts])
 
+  const effectsByKind = useMemo(() => {
+    const map: Record<string, { employee_balance_effect: EffectDirection | null; employer_profitability_effect: EffectDirection | null }> = {}
+    for (const opt of getOptions('employee_transaction_kind')) {
+      map[opt.code] = {
+        employee_balance_effect: (opt.employee_balance_effect ?? null) as EffectDirection | null,
+        employer_profitability_effect: (opt.employer_profitability_effect ?? null) as EffectDirection | null,
+      }
+    }
+    return map
+  }, [getOptions])
+
   const totals = useMemo(() => {
     return rows.reduce(
       (acc, row) => {
         const amount = Number(row.amount_usd ?? row.amount ?? 0)
-        acc.employeeBalance += signedImpact(amount, row.employee_balance_effect)
-        acc.employerProfitability += signedImpact(amount, row.employer_profitability_effect)
+        const effects = effectsByKind[row.entry_kind]
+        acc.employeeBalance += signedImpact(amount, effects?.employee_balance_effect)
+        acc.employerProfitability += signedImpact(amount, effects?.employer_profitability_effect)
         return acc
       },
       { employeeBalance: 0, employerProfitability: 0 },
     )
-  }, [rows])
+  }, [rows, effectsByKind])
 
   const settlementSummary = useMemo(() => {
     const groups: Record<string, EmployeeTransaction[]> = {}
@@ -479,6 +523,63 @@ export function EmployeeTransactionsPage() {
     ? getOptions('transaction_payment_method')
     : FALLBACK_PAYMENT_METHODS
 
+  function patchDraft(id: string, patch: Partial<RowDraft>) {
+    setDrafts((prev) => {
+      const current = prev[id]
+      if (!current) return prev
+      return { ...prev, [id]: { ...current, ...patch } }
+    })
+  }
+
+  function updateSupportingFile(id: string, index: number, field: keyof FileDraft, value: string) {
+    setDrafts((prev) => {
+      const current = prev[id]
+      if (!current) return prev
+      const next = [...current.supportingFiles]
+      next[index] = { ...next[index], [field]: value }
+      return { ...prev, [id]: { ...current, supportingFiles: next } }
+    })
+  }
+
+  function addSupportingFile(id: string) {
+    setDrafts((prev) => {
+      const current = prev[id]
+      if (!current) return prev
+      return { ...prev, [id]: { ...current, supportingFiles: [...current.supportingFiles, emptyFileDraft()] } }
+    })
+  }
+
+  function removeSupportingFile(id: string, index: number) {
+    setDrafts((prev) => {
+      const current = prev[id]
+      if (!current) return prev
+      return { ...prev, [id]: { ...current, supportingFiles: current.supportingFiles.filter((_, i) => i !== index) } }
+    })
+  }
+
+  function addNewRow() {
+    clearNotice()
+    const draft = emptyDraft(yearMonth)
+    setDrafts((prev) => ({ ...prev, [draft.id]: draft }))
+    setNewRowIds((prev) => [draft.id, ...prev])
+  }
+
+  function cancelNewRow(id: string) {
+    setNewRowIds((prev) => prev.filter((x) => x !== id))
+    setDrafts((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    if (drawerRowId === id) setDrawerRowId(null)
+  }
+
+  function resetSavedRow(id: string) {
+    const row = rows.find((r) => r.id === id)
+    if (!row) return
+    setDrafts((prev) => ({ ...prev, [id]: draftFromRow(row) }))
+  }
+
   async function createFileRecord(file: FileDraft): Promise<string | null> {
     if (!activeBusinessId) return null
     const url = file.file_url.trim()
@@ -497,109 +598,55 @@ export function EmployeeTransactionsPage() {
       .select('id')
       .single()
 
-    if (error) {
-      throw new Error(error.message)
-    }
+    if (error) throw new Error(error.message)
     return data.id
   }
 
-  function startCreate() {
-    clearNotice()
-    setEditingId(null)
-    setFormDraft(emptyDraft(yearMonth))
-  }
-
-  function startEdit(row: EmployeeTransaction) {
-    if (row.is_system_generated) return
-    clearNotice()
-    setEditingId(row.id)
-    setFormDraft({
-      transaction_name: row.transaction_name,
-      employee_id: row.employee_id,
-      entry_kind: row.entry_kind,
-      txn_date: row.txn_date,
-      from_account_id: row.from_account_id ?? '',
-      to_account_id: row.to_account_id ?? '',
-      payment_method: row.payment_method ?? '',
-      amount_currency: row.amount_currency,
-      amount_inr: row.amount_inr != null ? String(row.amount_inr) : '',
-      exchange_rate: row.exchange_rate != null ? String(row.exchange_rate) : '',
-      amount_usd: String(row.amount_usd ?? row.amount),
-      employee_balance_effect: row.employee_balance_effect,
-      employer_profitability_effect: row.employer_profitability_effect,
-      settlement_group_id: row.settlement_group_id ?? '',
-      parent_transaction_id: row.parent_transaction_id ?? '',
-      layer_order: String(row.layer_order ?? 1),
-      expected_commission_percent: row.expected_commission_percent != null ? String(row.expected_commission_percent) : '',
-      actual_commission_percent: row.actual_commission_percent != null ? String(row.actual_commission_percent) : '',
-      expected_commission_amount_usd: row.expected_commission_amount_usd != null ? String(row.expected_commission_amount_usd) : '',
-      actual_commission_amount_usd: row.actual_commission_amount_usd != null ? String(row.actual_commission_amount_usd) : '',
-      description: row.description,
-      notes: row.notes ?? '',
-      transactionScreenshot: emptyFileDraft(),
-      confirmationScreenshot: emptyFileDraft(),
-      supportingFiles: [],
-    })
-  }
-
-  function addSupportingFileRow() {
-    setFormDraft((d) => ({ ...d, supportingFiles: [...d.supportingFiles, emptyFileDraft()] }))
-  }
-
-  function updateSupportingFile(index: number, field: keyof FileDraft, value: string) {
-    setFormDraft((d) => {
-      const next = [...d.supportingFiles]
-      next[index] = { ...next[index], [field]: value }
-      return { ...d, supportingFiles: next }
-    })
-  }
-
-  function removeSupportingFile(index: number) {
-    setFormDraft((d) => ({ ...d, supportingFiles: d.supportingFiles.filter((_, i) => i !== index) }))
-  }
-
-  async function saveForm() {
+  async function saveRow(id: string) {
     if (!activeBusinessId) return
+    const draft = drafts[id]
+    if (!draft) return
+    if (draft.isSystem) return
+
     clearNotice()
+    setSavingId(id)
 
-    const normalized = normalizeDraft(yearMonth, formDraft, showError)
-    if (!normalized) return
-
-    let screenshotId: string | null = null
-    let confirmationId: string | null = null
-
-    const editingRow = editingId ? rows.find((r) => r.id === editingId) ?? null : null
-    if (editingRow) {
-      screenshotId = editingRow.transaction_screenshot_id
-      confirmationId = editingRow.confirmation_screenshot_id
+    const normalized = normalizeDraft(yearMonth, draft, showError)
+    if (!normalized) {
+      setSavingId(null)
+      return
     }
 
+    let screenshotId: string | null = draft.existingScreenshotId
+    let confirmationId: string | null = draft.existingConfirmationId
+
     try {
-      const maybeShot = await createFileRecord(formDraft.transactionScreenshot)
+      const maybeShot = await createFileRecord(draft.transactionScreenshot)
       if (maybeShot) screenshotId = maybeShot
-      const maybeConfirm = await createFileRecord(formDraft.confirmationScreenshot)
+      const maybeConfirm = await createFileRecord(draft.confirmationScreenshot)
       if (maybeConfirm) confirmationId = maybeConfirm
     } catch (error) {
       showError((error as Error).message)
+      setSavingId(null)
       return
     }
 
     const basePayload = {
       business_id: activeBusinessId,
-      employee_id: formDraft.employee_id,
+      employee_id: draft.employee_id,
       project_id: null,
-      transaction_name: formDraft.transaction_name.trim(),
+      transaction_name: draft.transaction_name.trim(),
       txn_date: normalized.txnDate,
       period_month: normalized.periodMonth,
-      entry_kind: formDraft.entry_kind,
+      entry_kind: draft.entry_kind,
       amount: normalized.amountUsd,
-      amount_currency: formDraft.amount_currency,
+      amount_currency: draft.amount_currency,
       amount_inr: normalized.amountInr,
       exchange_rate: normalized.exchangeRate,
       amount_usd: normalized.amountUsd,
-      from_account_id: formDraft.from_account_id || null,
-      to_account_id: formDraft.to_account_id || null,
-      payment_method: formDraft.payment_method.trim() || null,
+      from_account_id: draft.from_account_id || null,
+      to_account_id: draft.to_account_id || null,
+      payment_method: draft.payment_method.trim() || null,
       transaction_screenshot_id: screenshotId,
       confirmation_screenshot_id: confirmationId,
       settlement_group_id: normalized.settlementGroupId,
@@ -611,24 +658,13 @@ export function EmployeeTransactionsPage() {
       actual_commission_amount_usd: normalized.actualCommissionAmountUsd,
       description: normalized.description,
       notes: normalized.notes,
-      employee_balance_effect: formDraft.employee_balance_effect,
-      employer_profitability_effect: formDraft.employer_profitability_effect,
     }
 
-    let transactionId = editingId
+    let transactionId: string | null = draft.isNew ? null : draft.id
+    const newFreshScreenshotAdded = !!draft.transactionScreenshot.file_url.trim()
+    const newFreshConfirmationAdded = !!draft.confirmationScreenshot.file_url.trim()
 
-    if (editingId) {
-      const { error } = await supabase
-        .from('employee_transactions')
-        .update({ ...basePayload, updated_at: new Date().toISOString() })
-        .eq('id', editingId)
-        .eq('is_system_generated', false)
-
-      if (error) {
-        showError(error.message)
-        return
-      }
-    } else {
+    if (draft.isNew) {
       const { data, error } = await supabase
         .from('employee_transactions')
         .insert({ ...basePayload, is_system_generated: false })
@@ -637,17 +673,31 @@ export function EmployeeTransactionsPage() {
 
       if (error) {
         showError(error.message)
+        setSavingId(null)
         return
       }
       transactionId = data.id
+    } else {
+      const { error } = await supabase
+        .from('employee_transactions')
+        .update({ ...basePayload, updated_at: new Date().toISOString() })
+        .eq('id', draft.id)
+        .eq('is_system_generated', false)
+
+      if (error) {
+        showError(error.message)
+        setSavingId(null)
+        return
+      }
     }
 
     if (!transactionId) {
       showError('Unable to save transaction.')
+      setSavingId(null)
       return
     }
 
-    if (screenshotId || confirmationId) {
+    if (newFreshScreenshotAdded || newFreshConfirmationAdded) {
       await supabase
         .from('employee_transaction_file_links')
         .delete()
@@ -655,25 +705,27 @@ export function EmployeeTransactionsPage() {
         .in('file_role', ['TRANSACTION_SCREENSHOT', 'CONFIRMATION_SCREENSHOT'])
 
       const fixedLinks: { transaction_id: string; file_id: string; file_role: 'TRANSACTION_SCREENSHOT' | 'CONFIRMATION_SCREENSHOT' }[] = []
-      if (screenshotId) fixedLinks.push({ transaction_id: transactionId, file_id: screenshotId, file_role: 'TRANSACTION_SCREENSHOT' })
-      if (confirmationId) fixedLinks.push({ transaction_id: transactionId, file_id: confirmationId, file_role: 'CONFIRMATION_SCREENSHOT' })
+      if (screenshotId && newFreshScreenshotAdded) fixedLinks.push({ transaction_id: transactionId, file_id: screenshotId, file_role: 'TRANSACTION_SCREENSHOT' })
+      if (confirmationId && newFreshConfirmationAdded) fixedLinks.push({ transaction_id: transactionId, file_id: confirmationId, file_role: 'CONFIRMATION_SCREENSHOT' })
       if (fixedLinks.length) {
         const { error } = await supabase.from('employee_transaction_file_links').insert(fixedLinks)
         if (error) {
           showError(error.message)
+          setSavingId(null)
           return
         }
       }
     }
 
     const extraLinks: { transaction_id: string; file_id: string; file_role: 'SUPPORTING_DOCUMENT' }[] = []
-    for (const file of formDraft.supportingFiles) {
+    for (const file of draft.supportingFiles) {
       if (!file.file_url.trim()) continue
       try {
-        const id = await createFileRecord(file)
-        if (id) extraLinks.push({ transaction_id: transactionId, file_id: id, file_role: 'SUPPORTING_DOCUMENT' })
+        const fileId = await createFileRecord(file)
+        if (fileId) extraLinks.push({ transaction_id: transactionId, file_id: fileId, file_role: 'SUPPORTING_DOCUMENT' })
       } catch (error) {
         showError((error as Error).message)
+        setSavingId(null)
         return
       }
     }
@@ -682,24 +734,40 @@ export function EmployeeTransactionsPage() {
       const { error } = await supabase.from('employee_transaction_file_links').insert(extraLinks)
       if (error) {
         showError(error.message)
+        setSavingId(null)
         return
       }
     }
 
-    setEditingId(null)
-    setFormDraft(emptyDraft(yearMonth))
+    if (draft.isNew) {
+      setNewRowIds((prev) => prev.filter((x) => x !== draft.id))
+      setDrafts((prev) => {
+        const next = { ...prev }
+        delete next[draft.id]
+        return next
+      })
+      if (drawerRowId === draft.id) setDrawerRowId(null)
+    }
+
+    setSavingId(null)
     await loadData()
-    showSuccess(editingId ? 'Transaction updated.' : 'Transaction added.')
+    showSuccess(draft.isNew ? 'Transaction added.' : 'Transaction updated.')
   }
 
-  async function deleteRow(row: EmployeeTransaction) {
-    if (row.is_system_generated) return
+  async function deleteRow(id: string) {
+    const draft = drafts[id]
+    if (!draft) return
+    if (draft.isNew) {
+      cancelNewRow(id)
+      return
+    }
+    if (draft.isSystem) return
     if (!confirmAction('Delete this transaction?')) return
 
     const { error } = await supabase
       .from('employee_transactions')
       .delete()
-      .eq('id', row.id)
+      .eq('id', id)
       .eq('is_system_generated', false)
 
     if (error) {
@@ -707,11 +775,7 @@ export function EmployeeTransactionsPage() {
       return
     }
 
-    if (editingId === row.id) {
-      setEditingId(null)
-      setFormDraft(emptyDraft(yearMonth))
-    }
-
+    if (drawerRowId === id) setDrawerRowId(null)
     await loadData()
     showSuccess('Transaction deleted.')
   }
@@ -726,7 +790,11 @@ export function EmployeeTransactionsPage() {
     return a ? a.account_name : id
   }
 
-  const computedUsd = computeDraftUsd(formDraft)
+  const orderedIds = useMemo(() => {
+    return [...newRowIds, ...rows.map((r) => r.id)]
+  }, [newRowIds, rows])
+
+  const drawerDraft = drawerRowId ? drafts[drawerRowId] ?? null : null
 
   if (!activeBusinessId) {
     return <p className="text-muted">Select a business first.</p>
@@ -738,20 +806,15 @@ export function EmployeeTransactionsPage() {
         title="Employee Transactions"
         actions={
           <div className="flex-row gap-xs">
-            <button type="button" className="btn-primary btn-sm" onClick={() => startCreate()}>
-              + New transaction
+            <button type="button" className="btn-primary btn-sm" onClick={addNewRow}>
+              + New row
             </button>
-            {editingId && (
-              <button type="button" className="btn-secondary btn-sm" onClick={() => { setEditingId(null); setFormDraft(emptyDraft(yearMonth)) }}>
-                Cancel edit
-              </button>
-            )}
           </div>
         }
       >
         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
-          Supports multi-layer routing (A to B through C,D,E), commission variance tracking, account-level routing,
-          payment method capture, INR to USD conversion with exchange rate, and proof document links.
+          Inline-editable grid. Core fields edit in place; click <strong>Details</strong> for commission, notes, and file
+          proofs. Supports multi-layer routing and INR to USD conversion.
         </p>
 
         <div className="form-grid" style={{ marginBottom: '1rem' }}>
@@ -766,270 +829,263 @@ export function EmployeeTransactionsPage() {
           </FormField>
         </div>
 
-        <form
-          className="form-grid"
-          style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--color-accent-light)', borderRadius: 'var(--radius-md)' }}
-          onSubmit={(e) => {
-            e.preventDefault()
-            saveForm()
-          }}
-        >
-          <h3 style={{ gridColumn: '1 / -1', margin: 0, fontSize: '0.95rem' }}>
-            {editingId ? 'Edit transaction' : 'Add transaction'}
-          </h3>
-
-          <FormField label="Name of transaction">
-            <input value={formDraft.transaction_name} onChange={(e) => setFormDraft((d) => ({ ...d, transaction_name: e.target.value }))} required />
-          </FormField>
-
-          <FormField label="Type of transaction">
-            <select
-              value={formDraft.entry_kind}
-              onChange={(e) => {
-                const kind = e.target.value as TransactionKind
-                const defaults = defaultEffectsForKind(kind)
-                setFormDraft((d) => ({
-                  ...d,
-                  entry_kind: kind,
-                  employee_balance_effect: defaults.employee_balance_effect,
-                  employer_profitability_effect: defaults.employer_profitability_effect,
-                }))
-              }}
-            >
-              {EDITABLE_KINDS.map((kind) => <option key={kind} value={kind}>{kindLabel(kind, getOptions)}</option>)}
-            </select>
-          </FormField>
-
-          <FormField label="Transaction date">
-            <input type="date" value={formDraft.txn_date} onChange={(e) => setFormDraft((d) => ({ ...d, txn_date: e.target.value }))} required />
-          </FormField>
-
-          <FormField label="Employee">
-            <select value={formDraft.employee_id} onChange={(e) => setFormDraft((d) => ({ ...d, employee_id: e.target.value }))} required>
-              <option value="">Select</option>
-              {employees.map((em) => <option key={em.id} value={em.id}>{em.full_name}</option>)}
-            </select>
-          </FormField>
-
-          <FormField label="From account">
-            <select value={formDraft.from_account_id} onChange={(e) => setFormDraft((d) => ({ ...d, from_account_id: e.target.value }))}>
-              <option value="">Select</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
-            </select>
-          </FormField>
-
-          <FormField label="To account">
-            <select value={formDraft.to_account_id} onChange={(e) => setFormDraft((d) => ({ ...d, to_account_id: e.target.value }))}>
-              <option value="">Select</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
-            </select>
-          </FormField>
-
-          <FormField label="Payment method">
-            <select value={formDraft.payment_method} onChange={(e) => setFormDraft((d) => ({ ...d, payment_method: e.target.value }))}>
-              <option value="">Select</option>
-              {paymentMethodOptions.map((m) => <option key={m.code} value={m.code}>{m.label}</option>)}
-            </select>
-          </FormField>
-
-          <FormField label="Amount currency">
-            <select value={formDraft.amount_currency} onChange={(e) => setFormDraft((d) => ({ ...d, amount_currency: e.target.value as 'USD' | 'INR' }))}>
-              <option value="USD">USD</option>
-              <option value="INR">INR</option>
-            </select>
-          </FormField>
-
-          {formDraft.amount_currency === 'INR' ? (
-            <>
-              <FormField label="Amount (INR)">
-                <input type="number" min="0.01" step="0.01" value={formDraft.amount_inr} onChange={(e) => setFormDraft((d) => ({ ...d, amount_inr: e.target.value }))} />
-              </FormField>
-              <FormField label="Exchange rate">
-                <input type="number" min="0.000001" step="0.000001" value={formDraft.exchange_rate} onChange={(e) => setFormDraft((d) => ({ ...d, exchange_rate: e.target.value }))} />
-              </FormField>
-              <FormField label="Amount (USD auto)">
-                <input value={computedUsd ? String(computedUsd) : ''} readOnly />
-              </FormField>
-            </>
-          ) : (
-            <FormField label="Amount (USD)">
-              <input type="number" min="0.01" step="0.01" value={formDraft.amount_usd} onChange={(e) => setFormDraft((d) => ({ ...d, amount_usd: e.target.value }))} />
-            </FormField>
-          )}
-
-          <FormField label="Employee balance calc">
-            <select value={formDraft.employee_balance_effect} onChange={(e) => setFormDraft((d) => ({ ...d, employee_balance_effect: e.target.value as EffectDirection }))}>
-              <option value="ADD">Add</option>
-              <option value="SUBTRACT">Subtract</option>
-            </select>
-          </FormField>
-
-          <FormField label="Employer profitability calc">
-            <select value={formDraft.employer_profitability_effect} onChange={(e) => setFormDraft((d) => ({ ...d, employer_profitability_effect: e.target.value as EffectDirection }))}>
-              <option value="ADD">Add</option>
-              <option value="SUBTRACT">Subtract</option>
-            </select>
-          </FormField>
-
-          <FormField label="Settlement group ID (multi-layer)">
-            <input value={formDraft.settlement_group_id} onChange={(e) => setFormDraft((d) => ({ ...d, settlement_group_id: e.target.value }))} placeholder="Optional UUID to group related legs" />
-          </FormField>
-
-          <FormField label="Parent transaction leg">
-            <select value={formDraft.parent_transaction_id} onChange={(e) => setFormDraft((d) => ({ ...d, parent_transaction_id: e.target.value }))}>
-              <option value="">None</option>
-              {rows.filter((r) => r.id !== editingId).map((r) => (
-                <option key={r.id} value={r.id}>{r.transaction_name} ({r.txn_date})</option>
-              ))}
-            </select>
-          </FormField>
-
-          <FormField label="Layer order">
-            <input type="number" min="1" step="1" value={formDraft.layer_order} onChange={(e) => setFormDraft((d) => ({ ...d, layer_order: e.target.value }))} />
-          </FormField>
-
-          <FormField label="Expected commission %">
-            <input type="number" min="0" step="0.0001" value={formDraft.expected_commission_percent} onChange={(e) => setFormDraft((d) => ({ ...d, expected_commission_percent: e.target.value }))} />
-          </FormField>
-
-          <FormField label="Actual commission %">
-            <input type="number" min="0" step="0.0001" value={formDraft.actual_commission_percent} onChange={(e) => setFormDraft((d) => ({ ...d, actual_commission_percent: e.target.value }))} />
-          </FormField>
-
-          <FormField label="Expected commission USD">
-            <input type="number" min="0" step="0.01" value={formDraft.expected_commission_amount_usd} onChange={(e) => setFormDraft((d) => ({ ...d, expected_commission_amount_usd: e.target.value }))} />
-          </FormField>
-
-          <FormField label="Actual commission USD">
-            <input type="number" min="0" step="0.01" value={formDraft.actual_commission_amount_usd} onChange={(e) => setFormDraft((d) => ({ ...d, actual_commission_amount_usd: e.target.value }))} />
-          </FormField>
-
-          <FormField label="Description">
-            <input value={formDraft.description} onChange={(e) => setFormDraft((d) => ({ ...d, description: e.target.value }))} />
-          </FormField>
-
-          <FormField label="Notes">
-            <input value={formDraft.notes} onChange={(e) => setFormDraft((d) => ({ ...d, notes: e.target.value }))} />
-          </FormField>
-
-          <FormField label="Transaction screenshot name">
-            <input value={formDraft.transactionScreenshot.file_name} onChange={(e) => setFormDraft((d) => ({ ...d, transactionScreenshot: { ...d.transactionScreenshot, file_name: e.target.value } }))} />
-          </FormField>
-
-          <FormField label="Transaction screenshot URL">
-            <input value={formDraft.transactionScreenshot.file_url} onChange={(e) => setFormDraft((d) => ({ ...d, transactionScreenshot: { ...d.transactionScreenshot, file_url: e.target.value } }))} placeholder="https://..." />
-          </FormField>
-
-          <FormField label="Confirmation screenshot name">
-            <input value={formDraft.confirmationScreenshot.file_name} onChange={(e) => setFormDraft((d) => ({ ...d, confirmationScreenshot: { ...d.confirmationScreenshot, file_name: e.target.value } }))} />
-          </FormField>
-
-          <FormField label="Confirmation screenshot URL">
-            <input value={formDraft.confirmationScreenshot.file_url} onChange={(e) => setFormDraft((d) => ({ ...d, confirmationScreenshot: { ...d.confirmationScreenshot, file_url: e.target.value } }))} placeholder="https://..." />
-          </FormField>
-
-          <div className="field" style={{ justifyContent: 'flex-end' }}>
-            <button type="button" className="btn-secondary btn-sm" onClick={addSupportingFileRow}>+ Add supporting proof</button>
-          </div>
-
-          {formDraft.supportingFiles.map((f, i) => (
-            <div key={`support-${i}`} className="form-grid" style={{ gridColumn: '1 / -1', padding: '0.5rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
-              <FormField label={`Support file ${i + 1} name`}>
-                <input value={f.file_name} onChange={(e) => updateSupportingFile(i, 'file_name', e.target.value)} />
-              </FormField>
-              <FormField label={`Support file ${i + 1} URL`}>
-                <input value={f.file_url} onChange={(e) => updateSupportingFile(i, 'file_url', e.target.value)} placeholder="https://..." />
-              </FormField>
-              <FormField label="MIME type (optional)">
-                <input value={f.mime_type} onChange={(e) => updateSupportingFile(i, 'mime_type', e.target.value)} placeholder="image/png, application/pdf" />
-              </FormField>
-              <div className="field" style={{ justifyContent: 'flex-end' }}>
-                <button type="button" className="btn-danger btn-sm" onClick={() => removeSupportingFile(i)}>Remove</button>
-              </div>
-            </div>
-          ))}
-
-          <div className="field" style={{ justifyContent: 'flex-end' }}>
-            <button type="submit" className="btn-primary">{editingId ? 'Save changes' : 'Add transaction'}</button>
-          </div>
-        </form>
-
         <NoticeBanner message={message} type={type} />
 
         <div className="tableWrap">
-          <table>
+          <table style={{ fontSize: '0.82rem' }}>
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Employee</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Method</th>
-                <th>INR</th>
-                <th>FX</th>
-                <th>USD</th>
-                <th>Employee Calc</th>
-                <th>Employer Calc</th>
-                <th>Group / Layer</th>
-                <th>Commission (Exp / Act)</th>
-                <th>Proof</th>
-                <th>Actions</th>
+                <th style={{ minWidth: 130 }}>Date</th>
+                <th style={{ minWidth: 160 }}>Name</th>
+                <th style={{ minWidth: 170 }}>Type</th>
+                <th style={{ minWidth: 150 }}>Employee</th>
+                <th style={{ minWidth: 140 }}>From</th>
+                <th style={{ minWidth: 140 }}>To</th>
+                <th style={{ minWidth: 130 }}>Method</th>
+                <th style={{ minWidth: 70 }}>Cur</th>
+                <th style={{ minWidth: 100 }}>INR</th>
+                <th style={{ minWidth: 80 }}>FX</th>
+                <th style={{ minWidth: 110 }}>USD</th>
+                <th style={{ minWidth: 90 }}>Proof</th>
+                <th style={{ minWidth: 220 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.txn_date}</td>
-                  <td style={{ fontWeight: 600 }}>{row.transaction_name}</td>
-                  <td><span className="badge badge-neutral">{kindLabel(row.entry_kind, getOptions)}</span></td>
-                  <td>{empName(row.employee_id)}</td>
-                  <td>{accountName(row.from_account_id)}</td>
-                  <td>{accountName(row.to_account_id)}</td>
-                  <td>{row.payment_method ?? '—'}</td>
-                  <td>{row.amount_inr != null ? row.amount_inr.toLocaleString('en-US') : '—'}</td>
-                  <td>{row.exchange_rate != null ? row.exchange_rate.toFixed(4) : '—'}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{money(Number(row.amount_usd ?? row.amount ?? 0))}</td>
-                  <td><span className="badge badge-neutral">{effectBadge(row.employee_balance_effect)}</span></td>
-                  <td><span className="badge badge-neutral">{effectBadge(row.employer_profitability_effect)}</span></td>
-                  <td style={{ fontSize: '0.78rem' }}>{row.settlement_group_id ?? '—'} / {row.layer_order}</td>
-                  <td style={{ fontSize: '0.78rem' }}>
-                    {row.expected_commission_amount_usd != null || row.expected_commission_percent != null ? (
-                      <span>E: {row.expected_commission_amount_usd != null ? money(Number(row.expected_commission_amount_usd)) : `${row.expected_commission_percent}%`}</span>
-                    ) : 'E: —'}
-                    <br />
-                    {row.actual_commission_amount_usd != null || row.actual_commission_percent != null ? (
-                      <span>A: {row.actual_commission_amount_usd != null ? money(Number(row.actual_commission_amount_usd)) : `${row.actual_commission_percent}%`}</span>
-                    ) : 'A: —'}
-                  </td>
-                  <td style={{ fontSize: '0.78rem' }}>
-                    Txn: {row.transaction_screenshot_id && fileMap[row.transaction_screenshot_id] ? <a href={fileMap[row.transaction_screenshot_id].file_url} target="_blank" rel="noreferrer">View</a> : '—'}
-                    <br />
-                    Cfm: {row.confirmation_screenshot_id && fileMap[row.confirmation_screenshot_id] ? <a href={fileMap[row.confirmation_screenshot_id].file_url} target="_blank" rel="noreferrer">View</a> : '—'}
-                    <br />
-                    Docs: {attachmentCounts[row.id] ?? 0}
-                  </td>
-                  <td>
-                    {!row.is_system_generated ? (
-                      <div className="flex-row gap-xs" style={{ display: 'inline-flex' }}>
-                        <button type="button" className="btn-secondary btn-sm" onClick={() => startEdit(row)}>Edit</button>
-                        <button type="button" className="btn-danger btn-sm" onClick={() => deleteRow(row)}>Delete</button>
-                      </div>
-                    ) : (
-                      <span className="text-muted" style={{ fontSize: '0.75rem' }}>{sourceLabelByKind(row.entry_kind)}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-
-              {rows.length === 0 && (
+              {orderedIds.length === 0 && (
                 <tr>
-                  <td colSpan={16} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--color-text-muted)' }}>
+                  <td colSpan={13} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--color-text-muted)' }}>
                     No transactions for this period{filterEmployeeId ? ' and employee' : ''}.
                   </td>
                 </tr>
               )}
+              {orderedIds.map((id) => {
+                const draft = drafts[id]
+                if (!draft) return null
+                const editable = !draft.isSystem
+                const savedRow = !draft.isNew ? rows.find((r) => r.id === id) : null
+                const computedUsd = computeDraftUsd(draft)
+                const attachmentCount = !draft.isNew ? attachmentCounts[id] ?? 0 : 0
+                const txnShotFile = savedRow?.transaction_screenshot_id ? fileMap[savedRow.transaction_screenshot_id] : null
+                const confirmFile = savedRow?.confirmation_screenshot_id ? fileMap[savedRow.confirmation_screenshot_id] : null
+
+                return (
+                  <tr key={id} style={draft.isNew ? { background: 'var(--color-accent-light)' } : undefined}>
+                    <td style={{ padding: 0 }}>
+                      {editable ? (
+                        <input
+                          type="date"
+                          value={draft.txn_date}
+                          onChange={(e) => patchDraft(id, { txn_date: e.target.value })}
+                          style={cellInp}
+                        />
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>{draft.txn_date}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0 }}>
+                      {editable ? (
+                        <input
+                          value={draft.transaction_name}
+                          onChange={(e) => patchDraft(id, { transaction_name: e.target.value })}
+                          placeholder="Transaction name"
+                          style={{ ...cellInp, fontWeight: 600 }}
+                        />
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block', fontWeight: 600 }}>{draft.transaction_name}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0 }}>
+                      {editable ? (
+                        <select
+                          value={draft.entry_kind}
+                          onChange={(e) => patchDraft(id, { entry_kind: e.target.value as TransactionKind })}
+                          style={cellInp}
+                        >
+                          {EDITABLE_KINDS.map((kind) => (
+                            <option key={kind} value={kind}>{kindLabel(kind, getOptions)}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="badge badge-neutral" style={{ marginLeft: '0.45rem' }}>
+                          {kindLabel(draft.entry_kind, getOptions)}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0 }}>
+                      {editable ? (
+                        <select
+                          value={draft.employee_id}
+                          onChange={(e) => patchDraft(id, { employee_id: e.target.value })}
+                          style={cellInp}
+                        >
+                          <option value="">Select</option>
+                          {employees.map((em) => <option key={em.id} value={em.id}>{em.full_name}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>{empName(draft.employee_id)}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0 }}>
+                      {editable ? (
+                        <select
+                          value={draft.from_account_id}
+                          onChange={(e) => patchDraft(id, { from_account_id: e.target.value })}
+                          style={cellInp}
+                        >
+                          <option value="">—</option>
+                          {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>{accountName(draft.from_account_id || null)}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0 }}>
+                      {editable ? (
+                        <select
+                          value={draft.to_account_id}
+                          onChange={(e) => patchDraft(id, { to_account_id: e.target.value })}
+                          style={cellInp}
+                        >
+                          <option value="">—</option>
+                          {accounts.map((a) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>{accountName(draft.to_account_id || null)}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0 }}>
+                      {editable ? (
+                        <select
+                          value={draft.payment_method}
+                          onChange={(e) => patchDraft(id, { payment_method: e.target.value })}
+                          style={cellInp}
+                        >
+                          <option value="">—</option>
+                          {paymentMethodOptions.map((m) => <option key={m.code} value={m.code}>{m.label}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>{draft.payment_method || '—'}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0 }}>
+                      {editable ? (
+                        <select
+                          value={draft.amount_currency}
+                          onChange={(e) => patchDraft(id, { amount_currency: e.target.value as 'USD' | 'INR' })}
+                          style={cellInp}
+                        >
+                          <option value="USD">USD</option>
+                          <option value="INR">INR</option>
+                        </select>
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>{draft.amount_currency}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0, textAlign: 'right' }}>
+                      {editable && draft.amount_currency === 'INR' ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={draft.amount_inr}
+                          onChange={(e) => patchDraft(id, { amount_inr: e.target.value })}
+                          style={{ ...cellInp, textAlign: 'right' }}
+                        />
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>
+                          {draft.amount_currency === 'INR' && draft.amount_inr
+                            ? Number(draft.amount_inr).toLocaleString('en-US')
+                            : '—'}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0, textAlign: 'right' }}>
+                      {editable && draft.amount_currency === 'INR' ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.000001"
+                          value={draft.exchange_rate}
+                          onChange={(e) => patchDraft(id, { exchange_rate: e.target.value })}
+                          style={{ ...cellInp, textAlign: 'right' }}
+                        />
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>
+                          {draft.amount_currency === 'INR' && draft.exchange_rate
+                            ? Number(draft.exchange_rate).toFixed(4)
+                            : '—'}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: 0, textAlign: 'right', fontWeight: 600 }}>
+                      {editable && draft.amount_currency === 'USD' ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={draft.amount_usd}
+                          onChange={(e) => patchDraft(id, { amount_usd: e.target.value })}
+                          style={{ ...cellInp, textAlign: 'right', fontWeight: 600 }}
+                        />
+                      ) : (
+                        <span style={{ padding: '0.4rem 0.45rem', display: 'inline-block' }}>
+                          {money(draft.amount_currency === 'INR' ? computedUsd : Number(draft.amount_usd || 0))}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ fontSize: '0.72rem' }}>
+                      {draft.isNew ? (
+                        <span className="text-muted">—</span>
+                      ) : (
+                        <>
+                          T: {txnShotFile ? <a href={txnShotFile.file_url} target="_blank" rel="noreferrer">view</a> : '—'}
+                          <br />
+                          C: {confirmFile ? <a href={confirmFile.file_url} target="_blank" rel="noreferrer">view</a> : '—'}
+                          <br />
+                          Docs: {attachmentCount}
+                        </>
+                      )}
+                    </td>
+                    <td>
+                      {editable ? (
+                        <div className="flex-row gap-xs" style={{ display: 'inline-flex' }}>
+                          <button
+                            type="button"
+                            className="btn-secondary btn-sm"
+                            onClick={() => setDrawerRowId(drawerRowId === id ? null : id)}
+                          >
+                            {drawerRowId === id ? 'Close' : 'Details'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-primary btn-sm"
+                            onClick={() => saveRow(id)}
+                            disabled={savingId === id}
+                          >
+                            {savingId === id ? 'Saving…' : draft.isNew ? 'Add' : 'Save'}
+                          </button>
+                          {draft.isNew ? (
+                            <button type="button" className="btn-secondary btn-sm" onClick={() => cancelNewRow(id)}>
+                              Cancel
+                            </button>
+                          ) : (
+                            <>
+                              <button type="button" className="btn-secondary btn-sm" onClick={() => resetSavedRow(id)}>
+                                Reset
+                              </button>
+                              <button type="button" className="btn-danger btn-sm" onClick={() => deleteRow(id)}>
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted" style={{ fontSize: '0.75rem' }}>{sourceLabelByKind(draft.entry_kind)}</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -1079,7 +1135,7 @@ export function EmployeeTransactionsPage() {
                   <td style={{ fontSize: '0.78rem' }}>{s.groupId}</td>
                   <td>{accountName(s.sourceAccount || null)}</td>
                   <td>{accountName(s.targetAccount || null)}</td>
-                  <td>{s.throughAccounts ? s.throughAccounts.split(',').map((id) => accountName(id)).join(', ') : '—'}</td>
+                  <td>{s.throughAccounts ? s.throughAccounts.split(',').map((aid) => accountName(aid)).join(', ') : '—'}</td>
                   <td style={{ textAlign: 'right' }}>{money(s.sourcePaidUsd)}</td>
                   <td style={{ textAlign: 'right' }}>{money(s.targetReceivedUsd)}</td>
                   <td style={{ textAlign: 'right' }}>{money(s.expectedCommissionUsd)}</td>
@@ -1098,6 +1154,178 @@ export function EmployeeTransactionsPage() {
           </table>
         </div>
       </PageSection>
+
+      {drawerDraft && (
+        <div
+          role="dialog"
+          aria-label="Transaction details"
+          style={{
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: 'min(520px, 96vw)',
+            background: 'var(--color-surface)',
+            borderLeft: '1px solid var(--color-border)',
+            boxShadow: '-4px 0 18px rgba(0,0,0,0.12)',
+            zIndex: 50,
+            overflowY: 'auto',
+            padding: '1rem 1.25rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0, fontSize: '1rem' }}>
+              {drawerDraft.isNew ? 'New transaction details' : 'Transaction details'}
+            </h3>
+            <button type="button" className="btn-secondary btn-sm" onClick={() => setDrawerRowId(null)}>Close</button>
+          </div>
+
+          <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
+            Edit routing, commissions, notes, and proof file links. Changes here are saved when you click <strong>Save</strong> on the row.
+          </p>
+
+          <div className="form-grid">
+            <FormField label="Settlement group ID">
+              <input
+                value={drawerDraft.settlement_group_id}
+                onChange={(e) => patchDraft(drawerDraft.id, { settlement_group_id: e.target.value })}
+                placeholder="Optional UUID to group related legs"
+              />
+            </FormField>
+
+            <FormField label="Parent transaction leg">
+              <select
+                value={drawerDraft.parent_transaction_id}
+                onChange={(e) => patchDraft(drawerDraft.id, { parent_transaction_id: e.target.value })}
+              >
+                <option value="">None</option>
+                {rows.filter((r) => r.id !== drawerDraft.id).map((r) => (
+                  <option key={r.id} value={r.id}>{r.transaction_name} ({r.txn_date})</option>
+                ))}
+              </select>
+            </FormField>
+
+            <FormField label="Layer order">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={drawerDraft.layer_order}
+                onChange={(e) => patchDraft(drawerDraft.id, { layer_order: e.target.value })}
+              />
+            </FormField>
+
+            <FormField label="Expected commission %">
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                value={drawerDraft.expected_commission_percent}
+                onChange={(e) => patchDraft(drawerDraft.id, { expected_commission_percent: e.target.value })}
+              />
+            </FormField>
+
+            <FormField label="Actual commission %">
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                value={drawerDraft.actual_commission_percent}
+                onChange={(e) => patchDraft(drawerDraft.id, { actual_commission_percent: e.target.value })}
+              />
+            </FormField>
+
+            <FormField label="Expected commission USD">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={drawerDraft.expected_commission_amount_usd}
+                onChange={(e) => patchDraft(drawerDraft.id, { expected_commission_amount_usd: e.target.value })}
+              />
+            </FormField>
+
+            <FormField label="Actual commission USD">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={drawerDraft.actual_commission_amount_usd}
+                onChange={(e) => patchDraft(drawerDraft.id, { actual_commission_amount_usd: e.target.value })}
+              />
+            </FormField>
+
+            <FormField label="Description">
+              <input
+                value={drawerDraft.description}
+                onChange={(e) => patchDraft(drawerDraft.id, { description: e.target.value })}
+              />
+            </FormField>
+
+            <FormField label="Notes">
+              <input
+                value={drawerDraft.notes}
+                onChange={(e) => patchDraft(drawerDraft.id, { notes: e.target.value })}
+              />
+            </FormField>
+
+            <FormField label="Transaction screenshot name">
+              <input
+                value={drawerDraft.transactionScreenshot.file_name}
+                onChange={(e) => patchDraft(drawerDraft.id, { transactionScreenshot: { ...drawerDraft.transactionScreenshot, file_name: e.target.value } })}
+              />
+            </FormField>
+
+            <FormField label="Transaction screenshot URL">
+              <input
+                value={drawerDraft.transactionScreenshot.file_url}
+                onChange={(e) => patchDraft(drawerDraft.id, { transactionScreenshot: { ...drawerDraft.transactionScreenshot, file_url: e.target.value } })}
+                placeholder="https://..."
+              />
+            </FormField>
+
+            <FormField label="Confirmation screenshot name">
+              <input
+                value={drawerDraft.confirmationScreenshot.file_name}
+                onChange={(e) => patchDraft(drawerDraft.id, { confirmationScreenshot: { ...drawerDraft.confirmationScreenshot, file_name: e.target.value } })}
+              />
+            </FormField>
+
+            <FormField label="Confirmation screenshot URL">
+              <input
+                value={drawerDraft.confirmationScreenshot.file_url}
+                onChange={(e) => patchDraft(drawerDraft.id, { confirmationScreenshot: { ...drawerDraft.confirmationScreenshot, file_url: e.target.value } })}
+                placeholder="https://..."
+              />
+            </FormField>
+
+            <div className="field" style={{ gridColumn: '1 / -1', justifyContent: 'flex-start' }}>
+              <button type="button" className="btn-secondary btn-sm" onClick={() => addSupportingFile(drawerDraft.id)}>
+                + Add supporting proof
+              </button>
+            </div>
+
+            {drawerDraft.supportingFiles.map((f, i) => (
+              <div key={`sup-${i}`} style={{ gridColumn: '1 / -1', padding: '0.5rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
+                <div className="form-grid">
+                  <FormField label={`Support file ${i + 1} name`}>
+                    <input value={f.file_name} onChange={(e) => updateSupportingFile(drawerDraft.id, i, 'file_name', e.target.value)} />
+                  </FormField>
+                  <FormField label={`Support file ${i + 1} URL`}>
+                    <input value={f.file_url} onChange={(e) => updateSupportingFile(drawerDraft.id, i, 'file_url', e.target.value)} placeholder="https://..." />
+                  </FormField>
+                  <FormField label="MIME (optional)">
+                    <input value={f.mime_type} onChange={(e) => updateSupportingFile(drawerDraft.id, i, 'mime_type', e.target.value)} placeholder="image/png, application/pdf" />
+                  </FormField>
+                  <div className="field" style={{ justifyContent: 'flex-end' }}>
+                    <button type="button" className="btn-danger btn-sm" onClick={() => removeSupportingFile(drawerDraft.id, i)}>Remove</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   )
 }

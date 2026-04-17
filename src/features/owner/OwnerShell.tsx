@@ -77,7 +77,7 @@ export function OwnerShell({ session }: OwnerShellProps) {
     if (!activeBusinessId) return
     const { data } = await supabase
       .from('lookup_values')
-      .select('category,code,label')
+      .select('category,code,label,employee_balance_effect,employer_profitability_effect')
       .eq('business_id', activeBusinessId)
       .eq('is_active', true)
       .order('sort_order')
@@ -85,7 +85,12 @@ export function OwnerShell({ session }: OwnerShellProps) {
     const map: Record<string, LookupOption[]> = {}
     for (const row of data) {
       if (!map[row.category]) map[row.category] = []
-      map[row.category].push({ code: row.code, label: row.label })
+      map[row.category].push({
+        code: row.code,
+        label: row.label,
+        employee_balance_effect: row.employee_balance_effect ?? null,
+        employer_profitability_effect: row.employer_profitability_effect ?? null,
+      })
     }
     setLookupMap(map)
   }

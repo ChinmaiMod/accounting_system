@@ -273,8 +273,6 @@ export function TimesheetsPage() {
         payment_method: null,
         description,
         notes: null,
-        employee_balance_effect: 'ADD',
-        employer_profitability_effect: 'SUBTRACT',
         updated_at: new Date().toISOString(),
       })
       .eq('business_id', activeBusinessId)
@@ -309,8 +307,6 @@ export function TimesheetsPage() {
           description,
           notes: null,
           is_system_generated: true,
-          employee_balance_effect: 'ADD',
-          employer_profitability_effect: 'SUBTRACT',
         })
       if (insErr) { showError(insErr.message); return }
     }

@@ -1,4 +1,11 @@
-export type LookupOption = { code: string; label: string }
+export type EffectDirection = 'ADD' | 'SUBTRACT'
+
+export type LookupOption = {
+  code: string
+  label: string
+  employee_balance_effect?: EffectDirection | null
+  employer_profitability_effect?: EffectDirection | null
+}
 
 export const LOOKUP_CATEGORIES: {
   page: string
@@ -112,28 +119,28 @@ export const LOOKUP_DEFAULTS: Record<string, LookupOption[]> = {
     { code: 'HOLIDAY_OT', label: 'Holiday OT' },
   ],
   employee_transaction_kind: [
-    { code: 'EMPLOYEE_EARNINGS', label: 'Employee earnings' },
-    { code: 'EXPENSE_DEDUCTION', label: 'Expense deduction' },
-    { code: 'EXPENSE_REIMBURSEMENT', label: 'Expense reimbursement' },
-    { code: 'MANUAL_CREDIT', label: 'Manual credit' },
-    { code: 'MANUAL_DEBIT', label: 'Manual debit' },
-    { code: 'PAYMENT_TO_EMPLOYEE', label: 'Payment to employee' },
-    { code: 'EMPLOYEE_PAYROLL_DIRECT_DEPOSIT', label: 'Employee Payroll with Direct Deposit' },
-    { code: 'EMPLOYEE_PAYROLL_CHECK', label: 'Employee Payroll with Check' },
-    { code: 'PAYROLL_AMENDMENT_FEES', label: 'Payroll Amendment Fees' },
-    { code: 'EMPLOYER_TAX_FULL_PAYROLL', label: 'Employer Taxes for full payroll' },
-    { code: 'EMPLOYER_TAX_LCA_DEFICIENCY', label: 'Employer Taxes for LCA deficiency' },
-    { code: 'CANDIDATE_PAYMENT_INDIA', label: 'Payment to Candidate in India' },
-    { code: 'CANDIDATE_REPAYMENT_INDIA', label: 'Payment made by candidate in India' },
-    { code: 'HEALTH_INSURANCE_DEDUCTION', label: 'Health Insurance Deduction' },
-    { code: 'H1B_AMENDMENT_FILING_FEES', label: 'H1B Amendment Filing Fees' },
-    { code: 'H1B_AMENDMENT_ATTORNEY_FEES', label: 'H1B Amendment Attorney Fees' },
-    { code: 'H1B_AMENDMENT_EXTENSION_FILING_FEES', label: 'H1B Amendment + Extension Filing Fees' },
-    { code: 'H1B_AMENDMENT_EXTENSION_ATTORNEY_FEES', label: 'H1B Amendment + Extension Attorney Fees' },
-    { code: 'H4_FILING_FEES', label: 'H4 Filing Fees' },
-    { code: 'H4_ATTORNEY_FEES', label: 'H4 Attorney Fees' },
-    { code: 'H4_EAD_FILING_FEES', label: 'H4 EAD Filing Fees' },
-    { code: 'H4_EAD_ATTORNEY_FEES', label: 'H4 EAD Attorney Fees' },
+    { code: 'EMPLOYEE_EARNINGS', label: 'Employee earnings', employee_balance_effect: 'ADD', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'EXPENSE_DEDUCTION', label: 'Expense deduction', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'ADD' },
+    { code: 'EXPENSE_REIMBURSEMENT', label: 'Expense reimbursement', employee_balance_effect: 'ADD', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'MANUAL_CREDIT', label: 'Manual credit', employee_balance_effect: 'ADD', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'MANUAL_DEBIT', label: 'Manual debit', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'ADD' },
+    { code: 'PAYMENT_TO_EMPLOYEE', label: 'Payment to employee', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'ADD' },
+    { code: 'EMPLOYEE_PAYROLL_DIRECT_DEPOSIT', label: 'Employee Payroll with Direct Deposit', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'EMPLOYEE_PAYROLL_CHECK', label: 'Employee Payroll with Check', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'PAYROLL_AMENDMENT_FEES', label: 'Payroll Amendment Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'EMPLOYER_TAX_FULL_PAYROLL', label: 'Employer Taxes for full payroll', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'EMPLOYER_TAX_LCA_DEFICIENCY', label: 'Employer Taxes for LCA deficiency', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'CANDIDATE_PAYMENT_INDIA', label: 'Payment to Candidate in India', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'CANDIDATE_REPAYMENT_INDIA', label: 'Payment made by candidate in India', employee_balance_effect: 'ADD', employer_profitability_effect: 'ADD' },
+    { code: 'HEALTH_INSURANCE_DEDUCTION', label: 'Health Insurance Deduction', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'ADD' },
+    { code: 'H1B_AMENDMENT_FILING_FEES', label: 'H1B Amendment Filing Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'H1B_AMENDMENT_ATTORNEY_FEES', label: 'H1B Amendment Attorney Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'H1B_AMENDMENT_EXTENSION_FILING_FEES', label: 'H1B Amendment + Extension Filing Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'H1B_AMENDMENT_EXTENSION_ATTORNEY_FEES', label: 'H1B Amendment + Extension Attorney Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'H4_FILING_FEES', label: 'H4 Filing Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'H4_ATTORNEY_FEES', label: 'H4 Attorney Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'H4_EAD_FILING_FEES', label: 'H4 EAD Filing Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
+    { code: 'H4_EAD_ATTORNEY_FEES', label: 'H4 EAD Attorney Fees', employee_balance_effect: 'SUBTRACT', employer_profitability_effect: 'SUBTRACT' },
   ],
   transaction_payment_method: [
     { code: 'ZELLE', label: 'Zelle' },
